@@ -131,6 +131,8 @@ function App() {
         <div style={{ marginBottom: '16px' }}>
           <RadarCanvas
             currentPacket={currentPacket}
+            packets={packets}
+            currentIndex={currentIndex}
             resolutionMode={resolutionMode}
             colorMode={colorMode}
             width={720}

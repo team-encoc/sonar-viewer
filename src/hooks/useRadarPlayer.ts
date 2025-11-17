@@ -30,6 +30,10 @@ export function useRadarPlayer(packets: ParsedPacket[]): UseRadarPlayerReturn {
   }, []);
 
   const reset = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     setIsPlaying(false);
     setCurrentIndex(0);
   }, []);
@@ -61,7 +65,7 @@ export function useRadarPlayer(packets: ParsedPacket[]): UseRadarPlayerReturn {
         intervalRef.current = null;
       }
     };
-  }, [isPlaying, packets.length]);
+  }, [isPlaying, packets.length, currentIndex]);
 
   // Reset when packets change
   useEffect(() => {
