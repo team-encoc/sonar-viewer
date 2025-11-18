@@ -11,8 +11,8 @@
 export function expandSonarSamples(samples: number[], targetDepth: number): Uint8Array {
   const expanded = new Uint8Array(targetDepth);
 
-  // Fixed gain amplification (12x)
-  const FIXED_GAIN = 12;
+  // Adjusted gain for 0-80 range (3.2x to map 80 -> 256)
+  const FIXED_GAIN = 3.2;
 
   for (let i = 0; i < targetDepth; i++) {
     const sourceIndex = (i / targetDepth) * samples.length;
