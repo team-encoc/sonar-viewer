@@ -98,9 +98,9 @@ function App() {
                 fontSize: '14px'
               }}
             >
-              <option value="144">144 (8px 컬럼)</option>
-              <option value="360">360 (4px 컬럼)</option>
-              <option value="720">720 (2px 컬럼)</option>
+              <option value="144">144 (4px 컬럼)</option>
+              <option value="360">360 (2px 컬럼)</option>
+              <option value="720">720 (1px 컬럼)</option>
             </select>
           </div>
 

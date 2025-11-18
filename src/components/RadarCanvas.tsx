@@ -1,52 +1,38 @@
-import { useRef, useEffect } from 'react';
-import { ParsedPacket } from '../utils/csvParser';
-import { createRenderPacket } from '../utils/sonarDataConverter';
-import { signalToColor, signalToColorIceFishing } from '../utils/colorMapping';
+import { useRef, useEffect } from "react";
+import { ParsedPacket } from "../utils/csvParser";
+import { createRenderPacket } from "../utils/sonarDataConverter";
+import { signalToColor, signalToColorIceFishing } from "../utils/colorMapping";
 
 interface RadarCanvasProps {
   currentPacket: ParsedPacket | null;
   packets: ParsedPacket[];
   currentIndex: number;
-  resolutionMode: '144' | '360' | '720';
-  colorMode: 'standard' | 'iceFishing';
+  resolutionMode: "144" | "360" | "720";
+  colorMode: "standard" | "iceFishing";
   width?: number;
   height?: number;
 }
 
-export function RadarCanvas({
-  currentPacket,
-  packets,
-  currentIndex,
-  resolutionMode,
-  colorMode,
-  width = 720,
-  height = 500
-}: RadarCanvasProps) {
+export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMode, colorMode, width = 720, height = 500 }: RadarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastRenderedIndexRef = useRef(-1);
 
   // Column width mapping
   const columnWidthMap = {
-    '144': 8,
-    '360': 4,
-    '720': 2
+    "144": 4,
+    "360": 2,
+    "720": 1,
   };
 
   // Depth samples mapping
   const depthSamplesMap = {
-    '144': 144,
-    '360': 360,
-    '720': 720
+    "144": 144,
+    "360": 360,
+    "720": 720,
   };
 
   // Helper function to render a single column
-  const renderColumn = (
-    pixelData: Uint8ClampedArray,
-    packet: ParsedPacket,
-    xPosition: number,
-    columnWidth: number,
-    depthSamples: number
-  ) => {
+  const renderColumn = (pixelData: Uint8ClampedArray, packet: ParsedPacket, xPosition: number, columnWidth: number, depthSamples: number) => {
     const renderData = createRenderPacket(packet.scanData, depthSamples);
     const MAX_RENDER_PIXELS = 200;
     const downsample = Math.max(1, Math.floor(depthSamples / MAX_RENDER_PIXELS));
@@ -78,9 +64,7 @@ export function RadarCanvas({
       }
 
       const signal = Math.max(0, Math.min(255, maxSignal));
-      const color = colorMode === 'iceFishing'
-        ? signalToColorIceFishing(signal)
-        : signalToColor(signal);
+      const color = colorMode === "iceFishing" ? signalToColorIceFishing(signal) : signalToColor(signal);
 
       const y = Math.floor((d / depthSamples) * height);
       const pixelHeight = Math.ceil((downsample / depthSamples) * height * 1.2);
@@ -108,7 +92,7 @@ export function RadarCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const columnWidth = columnWidthMap[resolutionMode];
@@ -116,9 +100,7 @@ export function RadarCanvas({
     const numColumns = Math.floor(width / columnWidth);
 
     // Check if we need to redraw entire canvas (seek or reset)
-    const isSeekOrReset = currentIndex <= lastRenderedIndexRef.current ||
-                          lastRenderedIndexRef.current === -1 ||
-                          currentIndex - lastRenderedIndexRef.current > 1;
+    const isSeekOrReset = currentIndex <= lastRenderedIndexRef.current || lastRenderedIndexRef.current === -1 || currentIndex - lastRenderedIndexRef.current > 1;
 
     if (isSeekOrReset || packets.length === 0) {
       // Redraw entire canvas with history
@@ -173,32 +155,36 @@ export function RadarCanvas({
   }, [currentPacket, currentIndex, packets, resolutionMode, colorMode, width, height]);
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: "relative" }}>
       <canvas
         ref={canvasRef}
         width={width}
         height={height}
         style={{
-          backgroundColor: '#000',
-          border: '1px solid #333',
-          borderRadius: '8px'
+          backgroundColor: "#000",
+          border: "1px solid #333",
+          borderRadius: "8px",
         }}
       />
       {currentPacket && (
-        <div style={{
-          position: 'absolute',
-          top: 10,
-          left: 10,
-          color: '#fff',
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          padding: '8px 12px',
-          borderRadius: '4px',
-          fontSize: '12px',
-          fontFamily: 'monospace'
-        }}>
+        <div
+          style={{
+            position: "absolute",
+            top: 10,
+            left: 10,
+            color: "#fff",
+            backgroundColor: "rgba(0,0,0,0.7)",
+            padding: "8px 12px",
+            borderRadius: "4px",
+            fontSize: "12px",
+            fontFamily: "monospace",
+          }}
+        >
           <div>Depth: {currentPacket.depth.toFixed(1)}m</div>
           <div>Temp: {currentPacket.temperature.toFixed(1)}°C</div>
-          <div>Mode: {resolutionMode} ({columnWidthMap[resolutionMode]}px)</div>
+          <div>
+            Mode: {resolutionMode} ({columnWidthMap[resolutionMode]}px)
+          </div>
         </div>
       )}
     </div>

@@ -44,7 +44,7 @@ export function useRadarPlayer(packets: ParsedPacket[]): UseRadarPlayerReturn {
     }
   }, [packets.length]);
 
-  // Playback interval (14Hz = 71.4ms)
+  // Playback interval (28Hz = 35.7ms)
   useEffect(() => {
     if (isPlaying && packets.length > 0) {
       intervalRef.current = window.setInterval(() => {
@@ -56,7 +56,7 @@ export function useRadarPlayer(packets: ParsedPacket[]): UseRadarPlayerReturn {
           }
           return next;
         });
-      }, 71.4); // 14Hz packet rate
+      }, 35.7); // 28Hz packet rate
     }
 
     return () => {
