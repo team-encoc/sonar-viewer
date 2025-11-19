@@ -67,22 +67,48 @@ export function getColorForRawSignal(raw: number, depthRatio: number = 0.5): Col
   // STEP 3: 연속형 그라데이션 컬러맵 적용
   // ====================================================================
   // 색상 기준점 정의 (Gradient Color Stops)
-  // 0-10: Black → Deep Blue → Bright Yellow (배경 → 루어)
-  // 11-30: Chartreuse → Bright Green → Pale Green (수중 신호)
-  // 31-80: Chocolate Brown → Dark Brown (바닥)
+  // 0-4: Black
+  // 5: Yellow
+  // 6-19: Black
+  // 20-21: Chartreuse (전환)
+  // 22-24: Bright Green (수중 신호)
+  // 25-27: Pale Green (약한 수중 신호)
+  // 28-48: Peru (바닥 중간)
+  // 49-64: Saddle Brown (바닥)
+  // 65-80: Dark Brown (바닥 깊이)
   const colorStops = [
-    { threshold: 0.000, color: hexToRgba('#000000') },   // raw 0: Black (완전 빈 공간)
-    { threshold: 0.0125, color: hexToRgba('#000000') },  // raw 1: Pure Black ⬛
-    { threshold: 0.0625, color: hexToRgba('#001a33') },  // raw 5: Deep Navy Blue 🔵
-    { threshold: 0.125, color: hexToRgba('#FFFF00') },   // raw 10: Bright Yellow (물고기/루어) 🟡
-    { threshold: 0.1375, color: hexToRgba('#7FFF00') },  // raw 11: Chartreuse 🟢
-    { threshold: 0.20, color: hexToRgba('#00FF00') },    // raw 16: Bright Green 🟢
-    { threshold: 0.30, color: hexToRgba('#E0FFE0') },    // raw 24: Pale Green ⬜
-    { threshold: 0.375, color: hexToRgba('#E0FFE0') },   // raw 30: Pale Green ⬜
-    { threshold: 0.3875, color: hexToRgba('#D2691E') },  // raw 31: Chocolate Brown 🟫
-    { threshold: 0.60, color: hexToRgba('#CD853F') },    // raw 48: Peru 🟫
-    { threshold: 0.80, color: hexToRgba('#8B4513') },    // raw 64: Saddle Brown 🟫
-    { threshold: 1.00, color: hexToRgba('#654321') },    // raw 80: Dark Brown 🟫
+    { threshold: 0.000, color: hexToRgba('#000000') },   // raw 0: Black ⬛
+    { threshold: 0.0125, color: hexToRgba('#000000') },  // raw 1: Black ⬛
+    { threshold: 0.025, color: hexToRgba('#000000') },   // raw 2: Black ⬛
+    { threshold: 0.0375, color: hexToRgba('#000000') },  // raw 3: Black ⬛
+    { threshold: 0.05, color: hexToRgba('#000000') },    // raw 4: Black ⬛
+    { threshold: 0.0625, color: hexToRgba('#FFFF00') },  // raw 5: Yellow 🟡
+    { threshold: 0.075, color: hexToRgba('#000000') },   // raw 6: Black ⬛
+    { threshold: 0.0875, color: hexToRgba('#000000') },  // raw 7: Black ⬛
+    { threshold: 0.1, color: hexToRgba('#000000') },     // raw 8: Black ⬛
+    { threshold: 0.1125, color: hexToRgba('#000000') },  // raw 9: Black ⬛
+    { threshold: 0.125, color: hexToRgba('#000000') },   // raw 10: Black ⬛
+    { threshold: 0.1375, color: hexToRgba('#000000') },  // raw 11: Black ⬛
+    { threshold: 0.15, color: hexToRgba('#000000') },    // raw 12: Black ⬛
+    { threshold: 0.1625, color: hexToRgba('#000000') },  // raw 13: Black ⬛
+    { threshold: 0.175, color: hexToRgba('#000000') },   // raw 14: Black ⬛
+    { threshold: 0.1875, color: hexToRgba('#000000') },  // raw 15: Black ⬛
+    { threshold: 0.2, color: hexToRgba('#000000') },     // raw 16: Black ⬛
+    { threshold: 0.2125, color: hexToRgba('#000000') },  // raw 17: Black ⬛
+    { threshold: 0.225, color: hexToRgba('#000000') },   // raw 18: Black ⬛
+    { threshold: 0.2375, color: hexToRgba('#000000') },  // raw 19: Black ⬛
+    { threshold: 0.25, color: hexToRgba('#7FFF00') },    // raw 20: Chartreuse (시작) 🟢
+    { threshold: 0.2625, color: hexToRgba('#7FFF00') },  // raw 21: Chartreuse (끝) 🟢
+    { threshold: 0.275, color: hexToRgba('#00FF00') },   // raw 22: Bright Green (시작) 🟢
+    { threshold: 0.300, color: hexToRgba('#00FF00') },   // raw 24: Bright Green (끝) 🟢
+    { threshold: 0.3125, color: hexToRgba('#E0FFE0') },  // raw 25: Pale Green (시작) ⬜
+    { threshold: 0.3375, color: hexToRgba('#E0FFE0') },  // raw 27: Pale Green (끝) ⬜
+    { threshold: 0.350, color: hexToRgba('#CD853F') },   // raw 28: Peru (시작) 🟫
+    { threshold: 0.600, color: hexToRgba('#CD853F') },   // raw 48: Peru (끝) 🟫
+    { threshold: 0.6125, color: hexToRgba('#8B4513') },  // raw 49: Saddle Brown (시작) 🟫
+    { threshold: 0.800, color: hexToRgba('#8B4513') },   // raw 64: Saddle Brown (끝) 🟫
+    { threshold: 0.8125, color: hexToRgba('#654321') },  // raw 65: Dark Brown (시작) 🟫
+    { threshold: 1.000, color: hexToRgba('#654321') },   // raw 80: Dark Brown (끝) 🟫
   ];
 
   // ====================================================================

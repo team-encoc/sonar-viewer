@@ -17,7 +17,6 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastRenderedIndexRef = useRef(-1);
 
-
   // Column width mapping
   const columnWidthMap = {
     "144": 4,
@@ -25,7 +24,7 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
     "720": 1,
   };
 
-  // Depth samples mapping
+  // Depth samples mapping (6x for higher vertical resolution)
   const depthSamplesMap = {
     "144": 144,
     "360": 360,
@@ -33,79 +32,33 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
   };
 
   // Helper function to render a single column
-  const renderColumn = (
-    pixelData: Uint8ClampedArray,
-    packet: ParsedPacket,
-    xPosition: number,
-    columnWidth: number,
-    depthSamples: number
-  ) => {
+  const renderColumn = (pixelData: Uint8ClampedArray, packet: ParsedPacket, xPosition: number, columnWidth: number, depthSamples: number) => {
     const renderData = createRenderPacket(packet.scanData, depthSamples);
-    const MAX_RENDER_PIXELS = 200;
-    const downsample = Math.max(1, Math.floor(depthSamples / MAX_RENDER_PIXELS));
+    const MAX_RENDER_PIXELS = height; // Use full canvas height for maximum detail
+
+    // Skip first 24 raw samples (0-23) and only show raw samples 24-88
+    // Calculate START_DEPTH based on raw sample index: raw_index * (depthSamples / 90)
+    const START_DEPTH = Math.floor(1 * (depthSamples / 90));
+    const effectiveDepthSamples = depthSamples - START_DEPTH;
+    const downsample = Math.max(1, Math.floor(effectiveDepthSamples / MAX_RENDER_PIXELS));
 
     // ====================================================================
-    // STEP 1: 바닥선(Bottom Line) 감지
+    // Render each depth with pure data colors (START_DEPTH부터 시작)
     // ====================================================================
-    // 바닥은 "마지막/가장 깊은" 지속적인 강한 신호 영역으로 감지
-    // (중간에 떠있는 물체(루어)와 구분하기 위해)
-    let bottomDepthIndex = -1; // 바닥이 감지된 depth 인덱스
-    const BOTTOM_THRESHOLD_RAW = 65; // raw 값 기준 바닥 임계값
-    const BOTTOM_CONTINUITY_COUNT = 10; // 바닥으로 인정하려면 최소 연속 10개 이상의 강한 신호 필요
-
-    // 역방향 스캔: 깊은 곳에서 수면 방향으로 스캔
-    for (let d = depthSamples - 1; d >= BOTTOM_CONTINUITY_COUNT; d--) {
-      // 현재 위치부터 위쪽 10개 샘플을 확인
-      let continuousCount = 0;
-      for (let i = 0; i < BOTTOM_CONTINUITY_COUNT && (d - i) >= 0; i++) {
-        const amplifiedSignal = renderData[d - i];
-        const rawSignal = amplifiedSignal / 3.2;
-        if (rawSignal >= BOTTOM_THRESHOLD_RAW) {
-          continuousCount++;
-        }
-      }
-
-      // 10개 중 9개 이상이 강한 신호면 바닥으로 간주 (더 엄격한 조건)
-      // 이렇게 하면 루어(7개 샘플)는 검출되지 않고 바닥(13+ 샘플)만 검출됨
-      if (continuousCount >= 9) {
-        bottomDepthIndex = d - BOTTOM_CONTINUITY_COUNT + 1; // 연속 영역의 시작점
-        break;
-      }
-    }
-
-    // ====================================================================
-    // STEP 2: 각 depth별로 색상 결정 및 렌더링
-    // ====================================================================
-    for (let d = 0; d < depthSamples; d += downsample) {
+    for (let d = START_DEPTH; d < depthSamples; d += downsample) {
       let maxSignal = 0;
       for (let i = 0; i < downsample && d + i < depthSamples; i++) {
         maxSignal = Math.max(maxSignal, renderData[d + i]);
       }
 
-      const time = performance.now() / 1000;
-      const depthRatio = d / depthSamples;
-
-      if (depthRatio > 0.8) {
-        const pattern1 = Math.sin(d * 0.6 + time * 0.06) * 8;
-        const pattern2 = Math.sin(d * 1.8 + time * 0.12) * 5;
-        const pattern3 = Math.sin(d * 0.2 + time * 0.03) * 3;
-        maxSignal += pattern1 + pattern2 + pattern3;
-      }
-
-      if (maxSignal > 180) {
-        const waveEffect = Math.sin(d * 0.8 + time * 4) * 6;
-        maxSignal += waveEffect;
-      }
-
-      if (maxSignal < 96) {
-        const thermocline = Math.abs(Math.sin(depthRatio * 0.2 + time * 0.1)) * 3;
-        maxSignal += thermocline;
-      }
+      // Adjust depthRatio to be relative to the visible range (START_DEPTH to depthSamples)
+      const depthRatio = (d - START_DEPTH) / effectiveDepthSamples;
 
       const signal = Math.max(0, Math.min(255, maxSignal));
 
-      const y = Math.floor((d / depthSamples) * height);
-      const pixelHeight = Math.ceil((downsample / depthSamples) * height * 1.2);
+      // Map the visible depth range (START_DEPTH to depthSamples) to canvas height (0 to height)
+      const y = Math.floor(((d - START_DEPTH) / effectiveDepthSamples) * height);
+      const pixelHeight = Math.ceil((downsample / effectiveDepthSamples) * height);
 
       for (let px = 0; px < columnWidth; px++) {
         for (let py = 0; py < pixelHeight; py++) {
@@ -115,27 +68,10 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
           const x = xPosition + px;
           if (x < 0 || x >= width) continue;
 
-          // ====================================================================
-          // STEP 3: 색상 재계산 + 시각 강화
-          // ====================================================================
-          let finalColor;
+          // Apply color mapping (pure data only)
+          const finalColor = colorMode === "iceFishing" ? signalToColorIceFishing(signal) : signalToColor(signal, depthRatio);
 
-          // VISUAL ENHANCEMENT 3: 바닥선 강조 (바닥 바로 위 1~2 픽셀)
-          const isBottomHighlight = bottomDepthIndex !== -1 && d >= bottomDepthIndex - 2 && d < bottomDepthIndex;
-
-          if (isBottomHighlight) {
-            // 바닥선 바로 위 1~2 픽셀: 황금색 테두리로 바닥 강조
-            finalColor = getBottomHighlightColor();
-          } else {
-            // 모든 영역: 정상 컬러맵 적용
-            finalColor = colorMode === "iceFishing"
-              ? signalToColorIceFishing(signal)
-              : signalToColor(signal, depthRatio);
-          }
-
-          // ====================================================================
-          // STEP 4: 픽셀 데이터에 최종 색상 기록
-          // ====================================================================
+          // Write final color to pixel data
           const index = (drawY * width + x) * 4;
           pixelData[index] = finalColor.r;
           pixelData[index + 1] = finalColor.g;
@@ -162,7 +98,6 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
     const isSeekOrReset = currentIndex <= lastRenderedIndexRef.current || lastRenderedIndexRef.current === -1 || currentIndex - lastRenderedIndexRef.current > 1;
 
     if (isSeekOrReset || packets.length === 0) {
-
       // Redraw entire canvas with history
       const imageData = ctx.createImageData(width, height);
       const pixelData = imageData.data;
