@@ -67,17 +67,22 @@ export function getColorForRawSignal(raw: number, depthRatio: number = 0.5): Col
   // STEP 3: 연속형 그라데이션 컬러맵 적용
   // ====================================================================
   // 색상 기준점 정의 (Gradient Color Stops)
-  // 1-10: Deep Navy → Bright Gold, 11-30: Orange → Crimson, 31-80: Dark Red
+  // 0-10: Black → Deep Blue → Bright Yellow (배경 → 루어)
+  // 11-30: Chartreuse → Bright Green → Pale Green (수중 신호)
+  // 31-80: Chocolate Brown → Dark Brown (바닥)
   const colorStops = [
     { threshold: 0.000, color: hexToRgba('#000000') },   // raw 0: Black (완전 빈 공간)
-    { threshold: 0.0125, color: hexToRgba('#020814') },  // raw 1: Deep Navy (물 시작)
-    { threshold: 0.0625, color: hexToRgba('#1f618d') },  // raw 5: Navy Blue
-    { threshold: 0.125, color: hexToRgba('#FFD700') },   // raw 10: Bright Gold (물고기/루어) 🟡
-    { threshold: 0.1375, color: hexToRgba('#FFA500') },  // raw 11: Orange 시작 🟠
-    { threshold: 0.25, color: hexToRgba('#FF6347') },    // raw 20: Tomato Red
-    { threshold: 0.375, color: hexToRgba('#DC143C') },   // raw 30: Crimson 🔴
-    { threshold: 0.3875, color: hexToRgba('#8B0000') },  // raw 31: Dark Red 시작
-    { threshold: 1.00, color: hexToRgba('#8B0000') },    // raw 80: Dark Red (최대 강도)
+    { threshold: 0.0125, color: hexToRgba('#000000') },  // raw 1: Pure Black ⬛
+    { threshold: 0.0625, color: hexToRgba('#001a33') },  // raw 5: Deep Navy Blue 🔵
+    { threshold: 0.125, color: hexToRgba('#FFFF00') },   // raw 10: Bright Yellow (물고기/루어) 🟡
+    { threshold: 0.1375, color: hexToRgba('#7FFF00') },  // raw 11: Chartreuse 🟢
+    { threshold: 0.20, color: hexToRgba('#00FF00') },    // raw 16: Bright Green 🟢
+    { threshold: 0.30, color: hexToRgba('#E0FFE0') },    // raw 24: Pale Green ⬜
+    { threshold: 0.375, color: hexToRgba('#E0FFE0') },   // raw 30: Pale Green ⬜
+    { threshold: 0.3875, color: hexToRgba('#D2691E') },  // raw 31: Chocolate Brown 🟫
+    { threshold: 0.60, color: hexToRgba('#CD853F') },    // raw 48: Peru 🟫
+    { threshold: 0.80, color: hexToRgba('#8B4513') },    // raw 64: Saddle Brown 🟫
+    { threshold: 1.00, color: hexToRgba('#654321') },    // raw 80: Dark Brown 🟫
   ];
 
   // ====================================================================
@@ -93,30 +98,6 @@ export function getColorForRawSignal(raw: number, depthRatio: number = 0.5): Col
       const rangeSize = nextStop.threshold - currentStop.threshold;
       const t = rangeSize > 0 ? (norm - currentStop.threshold) / rangeSize : 0;
       baseColor = lerpColor(currentStop.color, nextStop.color, t);
-
-      // ====================================================================
-      // VISUAL ENHANCEMENT 1: 물고기/루어 구간 채도 및 밝기 강조 (norm 0.10~0.15, raw 8-12)
-      // ====================================================================
-      if (norm >= 0.10 && norm <= 0.15) {
-        // 물고기/루어 구간(Bright Gold): 채도와 밝기를 50% 증가시켜 매우 눈에 띄게 만듦
-        const boost = 1.5;
-        baseColor.r = Math.min(255, Math.round(baseColor.r * boost));
-        baseColor.g = Math.min(255, Math.round(baseColor.g * boost));
-        baseColor.b = Math.min(255, Math.round(baseColor.b * boost));
-      }
-
-      // ====================================================================
-      // VISUAL ENHANCEMENT 2: 배경(물) 영역 깊이별 그라데이션 (norm 0~0.05, raw 0-4)
-      // ====================================================================
-      if (norm <= 0.05) {
-        // 배경색에 깊이에 따른 밝기 조절
-        // 수면(depthRatio=0): +30% 밝게
-        // 깊은 곳(depthRatio=1): 원래 색 유지
-        const depthBrightness = 1.0 + (1.0 - depthRatio) * 0.3;
-        baseColor.r = Math.min(255, Math.round(baseColor.r * depthBrightness));
-        baseColor.g = Math.min(255, Math.round(baseColor.g * depthBrightness));
-        baseColor.b = Math.min(255, Math.round(baseColor.b * depthBrightness));
-      }
 
       return baseColor;
     }
