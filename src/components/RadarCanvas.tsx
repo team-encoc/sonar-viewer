@@ -1,14 +1,14 @@
 import { useRef, useEffect } from "react";
 import { ParsedPacket } from "../utils/csvParser";
 import { createRenderPacket } from "../utils/sonarDataConverter";
-import { signalToColor, signalToColorIceFishing, getBottomHighlightColor, getBottomTextureColor } from "../utils/colorMapping";
+import { signalToColor, signalToColorIceFishing, signalToColorT03Average, getBottomHighlightColor, getBottomTextureColor } from "../utils/colorMapping";
 
 interface RadarCanvasProps {
   currentPacket: ParsedPacket | null;
   packets: ParsedPacket[];
   currentIndex: number;
   resolutionMode: "144" | "360" | "720";
-  colorMode: "standard" | "iceFishing";
+  colorMode: "standard" | "iceFishing" | "t03Average";
   width?: number;
   height?: number;
 }
@@ -43,6 +43,15 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
     const renderData = createRenderPacket(packet.scanData, depthSamples);
     const MAX_RENDER_PIXELS = 200;
     const downsample = Math.max(1, Math.floor(depthSamples / MAX_RENDER_PIXELS));
+
+    // For T03Average mode: convert all depth values to raw for color mapping
+    // IMPORTANT: Use ORIGINAL 90 samples, not expanded renderData
+    let rawDepthValues: number[] | undefined;
+
+    if (colorMode === "t03Average") {
+      // Convert original 90 samples to raw values
+      rawDepthValues = packet.scanData.map(sample => sample);
+    }
 
     // ====================================================================
     // STEP 1: 바닥선(Bottom Line) 감지
@@ -123,14 +132,23 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
           // VISUAL ENHANCEMENT 3: 바닥선 강조 (바닥 바로 위 1~2 픽셀)
           const isBottomHighlight = bottomDepthIndex !== -1 && d >= bottomDepthIndex - 2 && d < bottomDepthIndex;
 
-          if (isBottomHighlight) {
-            // 바닥선 바로 위 1~2 픽셀: 황금색 테두리로 바닥 강조
+          if (isBottomHighlight && colorMode !== "t03Average") {
+            // 바닥선 바로 위 1~2 픽셀: 황금색 테두리로 바닥 강조 (t03Average 모드에서는 비활성화)
             finalColor = getBottomHighlightColor();
           } else {
             // 모든 영역: 정상 컬러맵 적용
-            finalColor = colorMode === "iceFishing"
-              ? signalToColorIceFishing(signal)
-              : signalToColor(signal, depthRatio);
+            if (colorMode === "iceFishing") {
+              finalColor = signalToColorIceFishing(signal);
+            } else if (colorMode === "t03Average") {
+              // T03 Average 모드: signal을 raw로 변환하고 전체 깊이 값 배열 전달
+              const raw = signal / 3.2;
+              // Map screen depth index (d) to original 90-sample index
+              const originalDepthIndex = Math.floor((d / depthSamples) * 90);
+              // Pass all raw depth values for bottom detection and average calculation
+              finalColor = signalToColorT03Average(raw, originalDepthIndex, rawDepthValues);
+            } else {
+              finalColor = signalToColor(signal, depthRatio);
+            }
           }
 
           // ====================================================================
@@ -162,12 +180,11 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
     const isSeekOrReset = currentIndex <= lastRenderedIndexRef.current || lastRenderedIndexRef.current === -1 || currentIndex - lastRenderedIndexRef.current > 1;
 
     if (isSeekOrReset || packets.length === 0) {
-
       // Redraw entire canvas with history
       const imageData = ctx.createImageData(width, height);
       const pixelData = imageData.data;
 
-      // Fill with background color (black for standard, white for ice fishing)
+      // Fill with background color (black for standard/t03Average, white for ice fishing)
       const bgColor = colorMode === "iceFishing" ? 255 : 0;
       for (let i = 0; i < pixelData.length; i += 4) {
         pixelData[i] = bgColor;

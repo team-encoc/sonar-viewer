@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python analyze_all_packets.py:*)"
+      "Bash(python analyze_all_packets.py:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []
