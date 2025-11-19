@@ -54,31 +54,30 @@ function lerpColor(color1: ColorRGBA, color2: ColorRGBA, t: number): ColorRGBA {
  */
 export function getColorForRawSignal(raw: number, depthRatio: number = 0.5): ColorRGBA {
   // ====================================================================
-  // STEP 1: 감도 조절 (0.6배로 낮춤)
+  // STEP 1: Raw 값 클램핑 (0-80 범위)
   // ====================================================================
-  let adjusted = raw * 0.6;
-  if (adjusted > 80) {
-    adjusted = 80;
-  }
+  const clampedRaw = Math.max(0, Math.min(80, raw));
 
   // ====================================================================
   // STEP 2: 정규화 (0~80 → 0~1)
   // ====================================================================
-  const norm = Math.max(0, Math.min(1, adjusted / 80));
+  const norm = clampedRaw / 80;
 
   // ====================================================================
   // STEP 3: 연속형 그라데이션 컬러맵 적용
   // ====================================================================
   // 색상 기준점 정의 (Gradient Color Stops)
+  // 1-10: Deep Navy → Bright Gold, 11-30: Orange → Crimson, 31-80: Dark Red
   const colorStops = [
-    { threshold: 0.00, color: hexToRgba('#020814') }, // Deep Navy (water)
-    { threshold: 0.20, color: hexToRgba('#061B3A') }, // Dark Navy Blue
-    { threshold: 0.35, color: hexToRgba('#0B3745') }, // Teal (turbid water)
-    { threshold: 0.50, color: hexToRgba('#2F7D3C') }, // Green (vegetation)
-    { threshold: 0.65, color: hexToRgba('#FFD700') }, // Bright Gold (fish - 더 눈에 띄게)
-    { threshold: 0.80, color: hexToRgba('#FFA500') }, // Bright Orange (strong signal - 채도 높임)
-    { threshold: 0.90, color: hexToRgba('#A8652E') }, // Brown (bottom)
-    { threshold: 1.00, color: hexToRgba('#E53935') }, // Red (hard bottom)
+    { threshold: 0.000, color: hexToRgba('#000000') },   // raw 0: Black (완전 빈 공간)
+    { threshold: 0.0125, color: hexToRgba('#020814') },  // raw 1: Deep Navy (물 시작)
+    { threshold: 0.0625, color: hexToRgba('#1f618d') },  // raw 5: Navy Blue
+    { threshold: 0.125, color: hexToRgba('#FFD700') },   // raw 10: Bright Gold (물고기/루어) 🟡
+    { threshold: 0.1375, color: hexToRgba('#FFA500') },  // raw 11: Orange 시작 🟠
+    { threshold: 0.25, color: hexToRgba('#FF6347') },    // raw 20: Tomato Red
+    { threshold: 0.375, color: hexToRgba('#DC143C') },   // raw 30: Crimson 🔴
+    { threshold: 0.3875, color: hexToRgba('#8B0000') },  // raw 31: Dark Red 시작
+    { threshold: 1.00, color: hexToRgba('#8B0000') },    // raw 80: Dark Red (최대 강도)
   ];
 
   // ====================================================================
@@ -96,19 +95,20 @@ export function getColorForRawSignal(raw: number, depthRatio: number = 0.5): Col
       baseColor = lerpColor(currentStop.color, nextStop.color, t);
 
       // ====================================================================
-      // VISUAL ENHANCEMENT 1: 물고기 구간 채도 강조 (norm 0.50~0.80)
+      // VISUAL ENHANCEMENT 1: 물고기/루어 구간 채도 및 밝기 강조 (norm 0.10~0.15, raw 8-12)
       // ====================================================================
-      if (norm >= 0.50 && norm <= 0.80) {
-        // 물고기 구간: 채도를 20% 증가시켜 더 눈에 띄게 만듦
-        const saturationBoost = 1.2;
-        baseColor.r = Math.min(255, Math.round(baseColor.r * saturationBoost));
-        baseColor.g = Math.min(255, Math.round(baseColor.g * saturationBoost));
+      if (norm >= 0.10 && norm <= 0.15) {
+        // 물고기/루어 구간(Bright Gold): 채도와 밝기를 50% 증가시켜 매우 눈에 띄게 만듦
+        const boost = 1.5;
+        baseColor.r = Math.min(255, Math.round(baseColor.r * boost));
+        baseColor.g = Math.min(255, Math.round(baseColor.g * boost));
+        baseColor.b = Math.min(255, Math.round(baseColor.b * boost));
       }
 
       // ====================================================================
-      // VISUAL ENHANCEMENT 2: 배경(물) 영역 깊이별 그라데이션 (norm 0~0.20)
+      // VISUAL ENHANCEMENT 2: 배경(물) 영역 깊이별 그라데이션 (norm 0~0.05, raw 0-4)
       // ====================================================================
-      if (norm <= 0.20) {
+      if (norm <= 0.05) {
         // 배경색에 깊이에 따른 밝기 조절
         // 수면(depthRatio=0): +30% 밝게
         // 깊은 곳(depthRatio=1): 원래 색 유지

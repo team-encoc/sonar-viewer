@@ -97,16 +97,29 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
     // ====================================================================
     // STEP 1: 바닥선(Bottom Line) 감지 (정리된 데이터로 수행)
     // ====================================================================
+    // 바닥은 "마지막/가장 깊은" 지속적인 강한 신호 영역으로 감지
+    // (중간에 떠있는 물체(루어)와 구분하기 위해)
     let bottomDepthIndex = -1; // 바닥이 감지된 depth 인덱스
     const BOTTOM_THRESHOLD_RAW = 65; // raw 값 기준 바닥 임계값
+    const BOTTOM_CONTINUITY_COUNT = 10; // 바닥으로 인정하려면 최소 연속 10개 이상의 강한 신호 필요
 
-    for (let d = 0; d < depthSamples; d++) {
-      const amplifiedSignal = cleanedData[d]; // 정리된 데이터 사용
-      const rawSignal = amplifiedSignal / 3.2; // gain 역계산
+    // 역방향 스캔: 깊은 곳에서 수면 방향으로 스캔
+    for (let d = depthSamples - 1; d >= BOTTOM_CONTINUITY_COUNT; d--) {
+      // 현재 위치부터 위쪽 10개 샘플을 확인
+      let continuousCount = 0;
+      for (let i = 0; i < BOTTOM_CONTINUITY_COUNT && (d - i) >= 0; i++) {
+        const amplifiedSignal = cleanedData[d - i];
+        const rawSignal = amplifiedSignal / 3.2;
+        if (rawSignal >= BOTTOM_THRESHOLD_RAW) {
+          continuousCount++;
+        }
+      }
 
-      if (rawSignal >= BOTTOM_THRESHOLD_RAW) {
-        bottomDepthIndex = d;
-        break; // 첫 번째 강한 신호를 바닥으로 간주
+      // 10개 중 9개 이상이 강한 신호면 바닥으로 간주 (더 엄격한 조건)
+      // 이렇게 하면 루어(7개 샘플)는 검출되지 않고 바닥(13+ 샘플)만 검출됨
+      if (continuousCount >= 9) {
+        bottomDepthIndex = d - BOTTOM_CONTINUITY_COUNT + 1; // 연속 영역의 시작점
+        break;
       }
     }
 
