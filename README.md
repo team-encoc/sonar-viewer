@@ -12,14 +12,19 @@
 
 2. **분석 실행**
 
+   Windows:
    ```bash
-   ./analyze_all_packets.py
+   python analyze_all_packets.py
    ```
 
-   or
-
+   Mac/Linux:
    ```bash
    python3 analyze_all_packets.py
+   ```
+
+   또는
+   ```bash
+   ./analyze_all_packets.py
    ```
 
 3. **결과 확인**

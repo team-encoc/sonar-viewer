@@ -6,12 +6,13 @@ Shows aggregate averages across all files and per-file averages
 import os
 import statistics
 from pathlib import Path
+from datetime import datetime
 
 def parse_csv_file(filepath):
     """Parse a single CSV file and extract all sonar packets"""
     packets = []
 
-    with open(filepath, 'r') as f:
+    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
     # Skip header
@@ -59,7 +60,7 @@ def calculate_depth_averages(all_packets):
 
     return depth_averages
 
-def analyze_all_packets(packet_data_dir='packetData'):
+def analyze_all_packets(packet_data_dir='packetData', output_dir='packetMdFiles'):
     """Analyze all CSV files in the packet data directory"""
 
     # Check if directory exists
@@ -67,6 +68,9 @@ def analyze_all_packets(packet_data_dir='packetData'):
         print(f"Error: Directory '{packet_data_dir}' does not exist.")
         print(f"Please create the directory and add CSV files to it.")
         return
+
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
 
     # Find all CSV files
     csv_files = list(Path(packet_data_dir).glob('*.csv'))
@@ -97,9 +101,9 @@ def analyze_all_packets(packet_data_dir='packetData'):
                 'packet_count': len(packets),
                 'averages': depth_averages
             })
-            print(f"✓ Loaded {csv_file.name}: {len(packets)} packets")
+            print(f"[OK] Loaded {csv_file.name}: {len(packets)} packets")
         else:
-            print(f"✗ {csv_file.name}: No valid packets found")
+            print(f"[SKIP] {csv_file.name}: No valid packets found")
 
     print()
     print("=" * 80)
@@ -108,6 +112,26 @@ def analyze_all_packets(packet_data_dir='packetData'):
     # Calculate aggregate averages
     if all_packets_combined:
         aggregate_averages = calculate_depth_averages(all_packets_combined)
+
+        # Generate markdown content
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        md_content = []
+
+        md_content.append(f"# Packet Analysis Report")
+        md_content.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        md_content.append(f"")
+        md_content.append(f"## Summary")
+        md_content.append(f"- Total CSV files: {len(csv_files)}")
+        md_content.append(f"- Total packets: {len(all_packets_combined)}")
+        md_content.append(f"")
+        md_content.append(f"## AGGREGATE (All Files Combined)")
+        md_content.append(f"Total packets: {len(all_packets_combined)}")
+        md_content.append(f"")
+        md_content.append(f"| Depth | Average |")
+        md_content.append(f"|-------|---------|")
+        for depth_idx in range(90):
+            md_content.append(f"| {depth_idx} | {aggregate_averages[depth_idx]:.2f} |")
+        md_content.append(f"")
 
         # Print aggregate results
         print(f"AGGREGATE (all files combined)")
@@ -120,8 +144,17 @@ def analyze_all_packets(packet_data_dir='packetData'):
         print("=" * 80)
         print()
 
-        # Print per-file results
+        # Print and add per-file results
         for result in file_results:
+            md_content.append(f"## FILE: {result['filename']}")
+            md_content.append(f"Packets: {result['packet_count']}")
+            md_content.append(f"")
+            md_content.append(f"| Depth | Average |")
+            md_content.append(f"|-------|---------|")
+            for depth_idx in range(90):
+                md_content.append(f"| {depth_idx} | {result['averages'][depth_idx]:.2f} |")
+            md_content.append(f"")
+
             print(f"FILE: {result['filename']}")
             print(f"Packets: {result['packet_count']}")
             print(f"-" * 80)
@@ -130,6 +163,16 @@ def analyze_all_packets(packet_data_dir='packetData'):
             print()
             print("=" * 80)
             print()
+
+        # Save to markdown file
+        output_filename = f"packet_analysis_{timestamp}.md"
+        output_path = os.path.join(output_dir, output_filename)
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(md_content))
+
+        print(f"[OK] Results saved to: {output_path}")
+        print()
     else:
         print("No valid packets found in any files.")
 
