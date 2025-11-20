@@ -317,17 +317,25 @@ export function signalToColorT03Average(
     // Adjusted to be less strict since we filtered out 80 values
     const BOTTOM_THRESHOLD = Math.max(p90, maxSignal * 0.75);
 
+    // ====================================================================
+    // STEP 3.1A: DETECT AND MARK SECOND REFLECTION (MULTIPATH) AREA
+    // Second reflection occurs when sonar signal bounces between bottom and surface
+    // It appears at approximately 2x the actual bottom depth
+    // ====================================================================
+
     // Find where bottom starts: look for sudden signal jump OR appearance of 80 values
     // Strategy: Bottom zone is indicated by:
     //   1. Appearance of 80 (0x50) values - these mark the sonar range limit
     //   2. Look backwards from first 80 to find where strong signal started
     //   3. OR sustained high signal above threshold (if no 80 values)
     let bottomStartIndex = -1;
+    let bottomEndIndex = -1; // Track where bottom region ends
+    let secondReflectionStartIndex = -1; // Track second reflection start
 
-    // First, check if there are any 80 values
+    // First, check if there are any 80 values (or very close to 80, like 79.9x)
     let first80Index = -1;
     for (let i = 0; i < allDepthValues.length; i++) {
-      if (allDepthValues[i] >= 80) {
+      if (allDepthValues[i] >= 79.5) {
         first80Index = i;
         break;
       }
@@ -347,6 +355,9 @@ export function signalToColorT03Average(
           break;
         }
       }
+
+      // Bottom ends at first 80 value
+      bottomEndIndex = first80Index;
     } else {
       // No 80 values found, look for sustained high signal (original logic)
       for (let i = 0; i < allDepthValues.length - 2; i++) {
@@ -362,6 +373,63 @@ export function signalToColorT03Average(
         // Check if current and next 2 samples are all above threshold
         if (current > BOTTOM_THRESHOLD && next1 > BOTTOM_THRESHOLD && next2 > BOTTOM_THRESHOLD) {
           bottomStartIndex = i;
+          break;
+        }
+      }
+
+      // If bottom found, find where it ends (signal drops back to low levels)
+      if (bottomStartIndex !== -1) {
+        for (let i = bottomStartIndex + 1; i < allDepthValues.length; i++) {
+          const val = allDepthValues[i];
+          // Bottom ends when signal drops below 50% of BOTTOM_THRESHOLD for 3+ consecutive samples
+          if (i < allDepthValues.length - 2) {
+            const current = allDepthValues[i];
+            const next1 = allDepthValues[i + 1];
+            const next2 = allDepthValues[i + 2];
+            if (current < BOTTOM_THRESHOLD * 0.5 && next1 < BOTTOM_THRESHOLD * 0.5 && next2 < BOTTOM_THRESHOLD * 0.5) {
+              bottomEndIndex = i;
+              break;
+            }
+          }
+        }
+        // If no clear end, assume bottom extends to end of data
+        if (bottomEndIndex === -1) {
+          bottomEndIndex = allDepthValues.length - 1;
+        }
+      }
+    }
+
+    // ====================================================================
+    // STEP 3.1B: DETECT SECOND REFLECTION
+    // Second reflection typically appears at ~2x the bottom depth
+    // It will have similar signal characteristics to the first bottom
+    // ====================================================================
+    if (bottomStartIndex !== -1 && bottomEndIndex !== -1) {
+      const bottomThickness = bottomEndIndex - bottomStartIndex;
+      // Estimate where second reflection might appear
+      // It should be roughly bottomEndIndex + bottomStartIndex distance
+      const expectedSecondReflectionStart = bottomEndIndex + bottomStartIndex;
+
+      // Look for second reflection in the range [1.5x to 2.5x bottom depth]
+      const searchStart = Math.floor(bottomEndIndex + bottomStartIndex * 0.5);
+      const searchEnd = Math.min(allDepthValues.length, Math.floor(bottomEndIndex + bottomStartIndex * 1.5));
+
+      // Search for sustained high signal in this range
+      for (let i = searchStart; i < searchEnd - 2; i++) {
+        const current = allDepthValues[i];
+        const next1 = allDepthValues[i + 1];
+        const next2 = allDepthValues[i + 2];
+
+        // Skip 80 values
+        if (current >= 80 || next1 >= 80 || next2 >= 80) {
+          continue;
+        }
+
+        // Check for sustained signal similar to bottom
+        // Use lower threshold (50% of BOTTOM_THRESHOLD) for second reflection as it's weaker
+        const secondReflectionThreshold = BOTTOM_THRESHOLD * 0.5;
+        if (current > secondReflectionThreshold && next1 > secondReflectionThreshold && next2 > secondReflectionThreshold) {
+          secondReflectionStartIndex = i;
           break;
         }
       }
@@ -398,20 +466,31 @@ export function signalToColorT03Average(
       console.log('[T03Average Debug]', {
         first80Index,
         bottomStartIndex,
+        bottomEndIndex,
+        secondReflectionStartIndex,
         BOTTOM_THRESHOLD,
         aboveBottomAverage,
-        minFishThreshold: Math.max(aboveBottomAverage * 2, 5),
+        minFishThreshold: Math.max(aboveBottomAverage * 3.5, 5),
         p95,
         maxSignal,
         sampleValues: allDepthValues.slice(0, 50) // First 50 depths
       });
     }
 
-    // Determine if current pixel is in bottom area
-    // Must satisfy BOTH conditions:
-    // 1. Depth is at or below bottom start (depthIndex >= bottomStartIndex)
-    // 2. Signal strength above threshold (raw > BOTTOM_THRESHOLD) - optional for texture
+    // ====================================================================
+    // STEP 3.3: HANDLE SECOND REFLECTION AS BOTTOM EXTENSION
+    // Based on real Deeper sonar screenshots, second reflection is also rendered as brown bottom
+    // Not hidden, but treated as continuation of bottom area
+    // ====================================================================
+
+    // Determine if current pixel is in bottom area (including second reflection)
+    // Bottom area includes:
+    // 1. Primary bottom: bottomStartIndex to bottomEndIndex (or beyond if no clear end)
+    // 2. Second reflection: also rendered as brown bottom (matches real sonar behavior)
     const isBottomArea = bottomStartIndex !== -1 && depthIndex >= bottomStartIndex;
+
+    // If we detected second reflection, we know where it starts, but we still render it as bottom
+    // The detection is just for logging/debugging purposes
 
     if (isBottomArea) {
       // BOTTOM AREA: Bright red/orange boundary line + brown gradient
@@ -420,32 +499,35 @@ export function signalToColorT03Average(
       const bottomDepthOffset = depthIndex - (bottomStartIndex || 0);
 
       // CRITICAL: First line of bottom (bottomStartIndex) = BRIGHT RED/ORANGE boundary
+      // EXACTLY 1 PIXEL: Only render boundary when bottomDepthOffset is EXACTLY 0
       if (bottomDepthOffset === 0) {
         // Bright red-orange boundary line (like in the screenshot)
-        return hexToRgba('#FF4500'); // OrangeRed - very visible boundary
+        // Use OrangeRed for high visibility
+        return hexToRgba('#FF4500', 255); // OrangeRed - very visible boundary
+      }
+
+      // Second line: Transition from boundary to brown gradient
+      if (bottomDepthOffset === 1) {
+        // Blend orange-red with dark orange for smoother transition
+        return hexToRgba('#FF6B00', 255); // Dark Orange-Red
       }
 
       // Rest of bottom: Brown gradient based on depth
-      // Texture variation using depth offset
-      const textureDepthIndex = bottomStartIndex > 0
-        ? Math.min(bottomStartIndex - 1, Math.abs(bottomDepthOffset % bottomStartIndex))
-        : 0;
+      // HORIZONTAL texture variation: Use raw signal value to create horizontal bands/stripes
+      // This creates texture that varies horizontally (across time/packets) rather than vertically
 
-      const textureValue = textureDepthIndex < allDepthValues.length
-        ? allDepthValues[textureDepthIndex]
-        : raw;
-
-      // Subtle noise for texture
-      const noisePattern = Math.sin(depthIndex * 0.3 + raw * 0.5) * 0.12;
-      const noiseFactor = 1 + noisePattern;
+      // Use raw signal value to create horizontal texture variation
+      // Higher raw values = lighter brown, lower raw values = darker brown
+      const signalInfluence = (raw - 20) / Math.max(maxSignal - 20, 1); // Normalize to 0-1
 
       // Calculate depth ratio (how deep into bottom area)
       const maxBottomDepth = allDepthValues.length - bottomStartIndex;
       const depthRatio = maxBottomDepth > 0 ? bottomDepthOffset / maxBottomDepth : 0;
 
-      // Apply texture influence
-      const textureInfluence = textureValue / Math.max(maxSignal, 1) * 0.2;
-      const finalRatio = Math.max(0, Math.min(1, (depthRatio + textureInfluence) * noiseFactor));
+      // Combine depth-based gradient with signal-based horizontal texture
+      // Signal influence creates horizontal variation, depth ratio creates vertical gradient
+      const textureWeight = 0.15; // How much horizontal texture affects the color (15%)
+      const finalRatio = Math.max(0, Math.min(1, depthRatio + signalInfluence * textureWeight));
 
       // Brown gradient (like in screenshot)
       if (finalRatio < 0.25) {
@@ -474,43 +556,55 @@ export function signalToColorT03Average(
       const difference = raw - aboveBottomAverage;
 
       // Fish/Lure detection: Signal must be significantly higher than average
-      // Minimum threshold: at least 2x average or raw > 5
-      const minFishThreshold = Math.max(aboveBottomAverage * 2, 5);
+      // ADJUSTED: Increased threshold from 2x to 3.5x to reduce excessive green signals
+      // Only VERY strong signals should appear as bright green (matching real sonar device)
+      const minFishThreshold = Math.max(aboveBottomAverage * 3.5, 5);
 
       if (raw > minFishThreshold) {
         // FISH/LURE: Signal significantly HIGHER than average
-        // Dark yellow tones for weak/moderate, bright green for strong
+        // 4-stage gradient: Dark Yellow → Bright Yellow → Lime Green → Bright Green
         const excessRatio = Math.min(1, (raw - minFishThreshold) / Math.max(minFishThreshold, 10));
 
-        const darkYellow1 = hexToRgba('#CCB800');   // Dark Yellow (weak fish)
-        const darkYellow2 = hexToRgba('#E6D200');   // Brighter Dark Yellow (moderate fish)
-        const brightGreen = hexToRgba('#00FF00');   // Bright Green (strong fish)
+        const darkYellow = hexToRgba('#CCB800');    // Stage 1: Dark Yellow (weak fish)
+        const brightYellow = hexToRgba('#FFFF00');  // Stage 2: Bright Yellow (moderate fish)
+        const limeGreen = hexToRgba('#32CD32');     // Stage 3: Lime Green (strong fish)
+        const brightGreen = hexToRgba('#00FF00');   // Stage 4: Bright Green (very strong fish)
 
-        if (excessRatio > 0.5) {
-          // Very strong fish: Dark Yellow 2 to Bright Green
-          const t = (excessRatio - 0.5) / 0.5;
-          return lerpColor(darkYellow2, brightGreen, t);
+        if (excessRatio > 0.75) {
+          // Stage 4: Very strong fish (Lime Green → Bright Green)
+          const t = (excessRatio - 0.75) / 0.25;
+          return lerpColor(limeGreen, brightGreen, t);
+        } else if (excessRatio > 0.5) {
+          // Stage 3: Strong fish (Bright Yellow → Lime Green)
+          const t = (excessRatio - 0.5) / 0.25;
+          return lerpColor(brightYellow, limeGreen, t);
+        } else if (excessRatio > 0.25) {
+          // Stage 2: Moderate fish (Dark Yellow → Bright Yellow)
+          const t = (excessRatio - 0.25) / 0.25;
+          return lerpColor(darkYellow, brightYellow, t);
         } else {
-          // Moderate fish: Dark Yellow 1 to Dark Yellow 2
-          const t = excessRatio / 0.5;
-          return lerpColor(darkYellow1, darkYellow2, t);
+          // Stage 1: Weak fish (Dark Yellow with varying intensity)
+          const alpha = Math.floor(150 + excessRatio / 0.25 * 105); // 150-255 alpha
+          return { r: darkYellow.r, g: darkYellow.g, b: darkYellow.b, a: alpha };
         }
       } else if (difference > 0) {
-        // Slightly above average but not fish: bright semi-transparent yellow
-        const alpha = Math.min(200, Math.floor((raw / minFishThreshold) * 150));
-        return { r: 255, g: 255, b: 0, a: alpha }; // Brighter yellow
+        // Slightly above average but not fish: darker, more transparent yellow
+        // ADJUSTED: Reduced alpha values to make these signals less prominent
+        const alpha = Math.min(100, Math.floor((raw / minFishThreshold) * 80));
+        return { r: 200, g: 200, b: 0, a: alpha }; // Darker yellow, lower alpha
       } else {
         // BELOW AVERAGE: Background/weak signals
-        const deficitRatio = Math.abs(difference) / aboveBottomAverage;
+        // ADJUSTED: Further reduced alpha values for cleaner background
+        const deficitRatio = Math.abs(difference) / Math.max(aboveBottomAverage, 1);
 
         if (deficitRatio < 0.3) {
           // Slightly below average: Dark gray/semi-transparent
-          const alpha = Math.floor((1 - deficitRatio / 0.3) * 100);
-          return { r: 60, g: 60, b: 60, a: alpha };
+          const alpha = Math.floor((1 - deficitRatio / 0.3) * 60); // Reduced from 100 to 60
+          return { r: 40, g: 40, b: 40, a: alpha };
         } else {
           // Well below average: Very transparent (background)
-          const alpha = Math.max(20, 60 - Math.floor(deficitRatio * 50));
-          return { r: 30, g: 30, b: 30, a: alpha };
+          const alpha = Math.max(10, 40 - Math.floor(deficitRatio * 30)); // Reduced opacity
+          return { r: 20, g: 20, b: 20, a: alpha };
         }
       }
     }
