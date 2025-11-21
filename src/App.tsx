@@ -6,13 +6,13 @@ import { useRadarPlayer } from './hooks/useRadarPlayer';
 import { ParsedPacket } from './utils/csvParser';
 
 type ResolutionMode = '144' | '360' | '720';
-type ColorMode = 'standard' | 'iceFishing' | 't03Average';
+type ColorMode = 'iceFishing' | 't03Average';
 
 function App() {
   const [packets, setPackets] = useState<ParsedPacket[]>([]);
   const [fileName, setFileName] = useState<string>('');
   const [resolutionMode, setResolutionMode] = useState<ResolutionMode>('360');
-  const [colorMode, setColorMode] = useState<ColorMode>('standard');
+  const [colorMode, setColorMode] = useState<ColorMode>('iceFishing');
 
   const {
     isPlaying,
@@ -119,7 +119,6 @@ function App() {
                 fontSize: '14px'
               }}
             >
-              <option value="standard">Standard (투명 배경)</option>
               <option value="iceFishing">Ice Fishing (흰색 배경)</option>
               <option value="t03Average">T03 평균 기반 (노란색 물고기)</option>
             </select>

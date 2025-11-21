@@ -8,7 +8,7 @@ interface RadarCanvasProps {
   packets: ParsedPacket[];
   currentIndex: number;
   resolutionMode: "144" | "360" | "720";
-  colorMode: "standard" | "iceFishing" | "t03Average";
+  colorMode: "iceFishing" | "t03Average";
   width?: number;
   height?: number;
 }
@@ -139,15 +139,13 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
             // 모든 영역: 정상 컬러맵 적용
             if (colorMode === "iceFishing") {
               finalColor = signalToColorIceFishing(signal);
-            } else if (colorMode === "t03Average") {
+            } else {
               // T03 Average 모드: signal을 raw로 변환하고 전체 깊이 값 배열 전달
               const raw = signal / 3.2;
               // Map screen depth index (d) to original 90-sample index
               const originalDepthIndex = Math.floor((d / depthSamples) * 90);
               // Pass all raw depth values for bottom detection and average calculation
               finalColor = signalToColorT03Average(raw, originalDepthIndex, rawDepthValues);
-            } else {
-              finalColor = signalToColor(signal, depthRatio);
             }
           }
 
