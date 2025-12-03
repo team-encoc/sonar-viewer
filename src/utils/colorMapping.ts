@@ -77,38 +77,18 @@ export function getColorForRawSignal(raw: number, _depthRatio: number = 0.5): Co
   // 49-64: Saddle Brown (바닥)
   // 65-80: Dark Brown (바닥 깊이)
   const colorStops = [
-    { threshold: 0.000, color: hexToRgba('#000000') },   // raw 0: Black ⬛
-    { threshold: 0.0125, color: hexToRgba('#000000') },  // raw 1: Black ⬛
-    { threshold: 0.025, color: hexToRgba('#000000') },   // raw 2: Black ⬛
-    { threshold: 0.0375, color: hexToRgba('#000000') },  // raw 3: Black ⬛
-    { threshold: 0.05, color: hexToRgba('#000000') },    // raw 4: Black ⬛
-    { threshold: 0.0625, color: hexToRgba('#FFFF00') },  // raw 5: Yellow 🟡
-    { threshold: 0.075, color: hexToRgba('#000000') },   // raw 6: Black ⬛
-    { threshold: 0.0875, color: hexToRgba('#000000') },  // raw 7: Black ⬛
-    { threshold: 0.1, color: hexToRgba('#000000') },     // raw 8: Black ⬛
-    { threshold: 0.1125, color: hexToRgba('#000000') },  // raw 9: Black ⬛
-    { threshold: 0.125, color: hexToRgba('#000000') },   // raw 10: Black ⬛
-    { threshold: 0.1375, color: hexToRgba('#000000') },  // raw 11: Black ⬛
-    { threshold: 0.15, color: hexToRgba('#000000') },    // raw 12: Black ⬛
-    { threshold: 0.1625, color: hexToRgba('#000000') },  // raw 13: Black ⬛
-    { threshold: 0.175, color: hexToRgba('#000000') },   // raw 14: Black ⬛
-    { threshold: 0.1875, color: hexToRgba('#000000') },  // raw 15: Black ⬛
-    { threshold: 0.2, color: hexToRgba('#000000') },     // raw 16: Black ⬛
-    { threshold: 0.2125, color: hexToRgba('#000000') },  // raw 17: Black ⬛
-    { threshold: 0.225, color: hexToRgba('#000000') },   // raw 18: Black ⬛
-    { threshold: 0.2375, color: hexToRgba('#000000') },  // raw 19: Black ⬛
-    { threshold: 0.25, color: hexToRgba('#7FFF00') },    // raw 20: Chartreuse (시작) 🟢
-    { threshold: 0.2625, color: hexToRgba('#7FFF00') },  // raw 21: Chartreuse (끝) 🟢
-    { threshold: 0.275, color: hexToRgba('#00FF00') },   // raw 22: Bright Green (시작) 🟢
-    { threshold: 0.300, color: hexToRgba('#00FF00') },   // raw 24: Bright Green (끝) 🟢
-    { threshold: 0.3125, color: hexToRgba('#E0FFE0') },  // raw 25: Pale Green (시작) ⬜
-    { threshold: 0.3375, color: hexToRgba('#E0FFE0') },  // raw 27: Pale Green (끝) ⬜
-    { threshold: 0.350, color: hexToRgba('#CD853F') },   // raw 28: Peru (시작) 🟫
-    { threshold: 0.600, color: hexToRgba('#CD853F') },   // raw 48: Peru (끝) 🟫
-    { threshold: 0.6125, color: hexToRgba('#8B4513') },  // raw 49: Saddle Brown (시작) 🟫
-    { threshold: 0.800, color: hexToRgba('#8B4513') },   // raw 64: Saddle Brown (끝) 🟫
-    { threshold: 0.8125, color: hexToRgba('#654321') },  // raw 65: Dark Brown (시작) 🟫
-    { threshold: 1.000, color: hexToRgba('#654321') },   // raw 80: Dark Brown (끝) 🟫
+    { threshold: 0.000, color: hexToRgba('#000000') },   // raw 0: Black (완전 빈 공간)
+    { threshold: 0.0125, color: hexToRgba('#000000') },  // raw 1: Pure Black ⬛
+    { threshold: 0.0625, color: hexToRgba('#001a33') },  // raw 5: Deep Navy Blue 🔵
+    { threshold: 0.125, color: hexToRgba('#FFFF00') },   // raw 10: Bright Yellow (물고기/루어) 🟡
+    { threshold: 0.1375, color: hexToRgba('#7FFF00') },  // raw 11: Chartreuse 🟢
+    { threshold: 0.20, color: hexToRgba('#ffffffff') },    // raw 16: Bright White 🟢
+    { threshold: 0.30, color: hexToRgba('#E0FFE0') },    // raw 24: Pale Green ⬜
+    { threshold: 0.375, color: hexToRgba('#E0FFE0') },   // raw 30: Pale Green ⬜
+    { threshold: 0.3875, color: hexToRgba('#D2691E') },  // raw 31: Chocolate Brown 🟫
+    { threshold: 0.60, color: hexToRgba('#CD853F') },    // raw 48: Peru 🟫
+    { threshold: 0.80, color: hexToRgba('#8B4513') },    // raw 64: Saddle Brown 🟫
+    { threshold: 1.00, color: hexToRgba('#654321') },    // raw 80: Dark Brown 🟫
   ];
 
   // ====================================================================
@@ -188,49 +168,93 @@ export function signalToColor(signal: number, depthRatio: number = 0.5): ColorRG
 }
 
 /**
- * Ice Fishing Mode v2
- * - 대부분의 물/노이즈는 흰색
- * - 바닥/강한 에코만 오렌지→빨강→보라로 표시
+ * ICE FISHING MODE - Inverted colors (bright background, strong signals = dark)
+ * White/Light Gray → Gray → Blue → Brown/Red → Purple
  */
 export function signalToColorIceFishing(signal: number): ColorRGBA {
-  const MAX_SIGNAL = 256;
+  // CSV data range: 0-16 with FIXED_GAIN 12 = 0-192
+  const BACKGROUND_THRESHOLD = 96; // 원본 8 * 12
+  const MAX_SIGNAL = 192; // 원본 16 * 12
 
-  // 1) 배경 threshold를 과감하게 높여서,
-  //    웬만한 수중 노이즈는 전부 "물(흰색)"로 처리
-  const BACKGROUND_THRESHOLD = 80; // ← 기존 26/30보다 훨씬 높게
-
-  // 거의 신호 없는 영역 = 물
+  // 0-7 range: Ice fishing background (white/light gray)
   if (signal < BACKGROUND_THRESHOLD) {
-    return { r: 255, g: 255, b: 255, a: 255 }; // pure white
+    return { r: 248, g: 248, b: 248, a: 255 };
   }
 
-  // 2) 80~256 범위만 0~255로 다시 매핑
-  const remapped = ((signal - BACKGROUND_THRESHOLD) / (MAX_SIGNAL - BACKGROUND_THRESHOLD)) * 255;
+  // Remap 96-192 to 0-255 for full color spectrum
+  const remappedSignal = ((signal - BACKGROUND_THRESHOLD) / (MAX_SIGNAL - BACKGROUND_THRESHOLD)) * 255;
 
-  const c = (r: number, g: number, b: number): ColorRGBA => ({
-    r,
-    g,
-    b,
-    a: 255,
-  });
+  let r: number, g: number, b: number, a: number;
 
-  // 3) 색 구간
-  if (remapped < 40) {
-    // 바닥 윗부분/약한 물체
-    return c(255, 245, 220);      // 아주 연한 노랑빛
-  } else if (remapped < 90) {
-    return c(255, 225, 170);      // 연한 오렌지
-  } else if (remapped < 140) {
-    return c(255, 200, 120);      // 오렌지
-  } else if (remapped < 190) {
-    return c(245, 150, 80);       // 진한 오렌지
-  } else if (remapped < 230) {
-    return c(235, 90, 50);        // 빨강/오렌지
-  } else if (remapped < 250) {
-    return c(170, 90, 170);       // 보라
+  if (remappedSignal < 15) {
+    // 0-14: Water background - white/very light gray
+    r = 248;
+    g = 248;
+    b = 248;
+    a = 255;
+  } else if (remappedSignal < 30) {
+    // 15-29: Very light gray
+    r = 232;
+    g = 232;
+    b = 232;
+    a = 255;
+  } else if (remappedSignal < 50) {
+    // 30-49: Light gray
+    r = 208;
+    g = 208;
+    b = 208;
+    a = 255;
+  } else if (remappedSignal < 80) {
+    // 50-79: Medium gray
+    r = 160;
+    g = 160;
+    b = 160;
+    a = 255;
+  } else if (remappedSignal < 110) {
+    // 80-109: Light blue/purple (weak signal)
+    r = 102;
+    g = 102;
+    b = 170;
+    a = 255;
+  } else if (remappedSignal < 140) {
+    // 110-139: Blue (medium signal)
+    r = 68;
+    g = 68;
+    b = 204;
+    a = 255;
+  } else if (remappedSignal < 170) {
+    // 140-169: Dark blue (strong signal)
+    r = 34;
+    g = 34;
+    b = 238;
+    a = 255;
+  } else if (remappedSignal < 200) {
+    // 170-199: Brown/orange (very strong signal)
+    r = 153;
+    g = 102;
+    b = 51;
+    a = 255;
+  } else if (remappedSignal < 230) {
+    // 200-229: Soft red (max signal)
+    r = 170;
+    g = 51;
+    b = 34;
+    a = 255;
+  } else if (remappedSignal < 250) {
+    // 230-249: Dark purple (surface/bottom reflection)
+    r = 119;
+    g = 68;
+    b = 119;
+    a = 255;
   } else {
-    return c(110, 60, 150);       // 진한 보라 (최강)
+    // 250-255: Very dark purple (strongest reflection)
+    r = 85;
+    g = 51;
+    b = 85;
+    a = 255;
   }
+
+  return { r, g, b, a };
 }
 
 /**
@@ -274,9 +298,10 @@ export function signalToColorT03Average(
   allDepthValues?: number[]
 ): ColorRGBA {
   // Step 1: Special value filtering - 80 is "out of range" marker
-  if (raw >= 79.5) {
-    return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent (invalid data)
-  }
+  // ✅ SKIP: Bottom area will handle 80 values with brown gradient
+  // if (raw >= 79.5) {
+  //   return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent (invalid data)
+  // }
 
   // Step 2: Noise filtering - values below 0.5 are transparent
   if (raw < 0.5) {
@@ -286,7 +311,7 @@ export function signalToColorT03Average(
   // Step 3: Very weak signals (0.5 ~ 2.0) - semi-transparent dark
   if (raw < 2.0) {
     const alpha = Math.floor(((raw - 0.5) / 1.5) * 80); // 0-80 alpha
-    return { r: 20, g: 20, b: 20, a: alpha };
+    return { r: 7, g: 7, b: 7, a: alpha };
   }
 
   // Step 3: If we have depth values, use bottom-relative strategy
@@ -299,7 +324,7 @@ export function signalToColorT03Average(
     // Calculate percentiles for dynamic thresholding
     // IMPORTANT: Filter out 80 (0x50) as it's a special "out of range" marker, not real data
     const sortedValues = [...allDepthValues]
-      .filter(v => v >= 2.0 && v < 80)  // Exclude 80 (special value)
+      .filter((v) => v >= 2.0 && v < 80) // Exclude 80 (special value)
       .sort((a, b) => a - b);
     const validCount = sortedValues.length;
 
@@ -309,7 +334,7 @@ export function signalToColorT03Average(
     }
 
     const p75 = sortedValues[Math.floor(validCount * 0.75)] || 10;
-    const p90 = sortedValues[Math.floor(validCount * 0.90)] || 20;
+    const p90 = sortedValues[Math.floor(validCount * 0.9)] || 20;
     const p95 = sortedValues[Math.floor(validCount * 0.95)] || 40;
     const maxSignal = sortedValues[validCount - 1] || 79;
 
@@ -332,12 +357,21 @@ export function signalToColorT03Average(
     let bottomEndIndex = -1; // Track where bottom region ends
     let secondReflectionStartIndex = -1; // Track second reflection start
 
-    // First, check if there are any 80 values (or very close to 80, like 79.9x)
+    // Find the FIRST consecutive group of 80 values (minimum 4 in a row)
+    // This filters out isolated 80 noise values
     let first80Index = -1;
+    let consecutiveCount = 0;
+
     for (let i = 0; i < allDepthValues.length; i++) {
       if (allDepthValues[i] >= 79.5) {
-        first80Index = i;
-        break;
+        consecutiveCount++;
+        if (consecutiveCount >= 4) {
+          // Found 4 consecutive 80 values - mark the start of this group
+          first80Index = i - 3; // Start index of the 4-value group
+          break;
+        }
+      } else {
+        consecutiveCount = 0;
       }
     }
 
@@ -457,7 +491,7 @@ export function signalToColorT03Average(
 
     // DEBUG: Log values for first pixel only (to avoid spam)
     if (depthIndex === 0) {
-      console.log('[T03Average Debug]', {
+      console.log("[T03Average Debug]", {
         first80Index,
         bottomStartIndex,
         bottomEndIndex,
@@ -467,7 +501,7 @@ export function signalToColorT03Average(
         minFishThreshold: Math.max(aboveBottomAverage * 3.5, 5),
         p95,
         maxSignal,
-        sampleValues: allDepthValues.slice(0, 50) // First 50 depths
+        sampleValues: allDepthValues.slice(0, 50), // First 50 depths
       });
     }
 
@@ -487,64 +521,17 @@ export function signalToColorT03Average(
     // The detection is just for logging/debugging purposes
 
     if (isBottomArea) {
-      // BOTTOM AREA: Bright red/orange boundary line + brown gradient
-      // Based on real sonar display (capture screenshot)
+      // ✅ NEW: Simple linear brown gradient based on signal strength (0~80)
+      // After detecting 4 consecutive 80 values, all remaining depths use brown gradient
 
-      const bottomDepthOffset = depthIndex - (bottomStartIndex || 0);
+      // Normalize signal to 0.0 ~ 1.0 range (0 = weak, 80 = strong)
+      const normalizedSignal = Math.min(80, Math.max(0, raw)) / 80;
 
-      // CRITICAL: First line of bottom (bottomStartIndex) = BRIGHT RED/ORANGE boundary
-      // EXACTLY 1 PIXEL: Only render boundary when bottomDepthOffset is EXACTLY 0
-      if (bottomDepthOffset === 0) {
-        // Bright red-orange boundary line (like in the screenshot)
-        // Use OrangeRed for high visibility
-        return hexToRgba('#FF4500', 255); // OrangeRed - very visible boundary
-      }
+      // Linear brown gradient: Orange-brown (weak signal) → Very dark brown (strong signal, including 80)
+      const lightBrown = hexToRgba("#DC8C1E"); // 주황빛 갈색 (0 value)
+      const veryDarkBrown = hexToRgba("#5A1F0F"); // 매우 진한 갈색 (80 value)
 
-      // Second line: Transition from boundary to brown gradient
-      if (bottomDepthOffset === 1) {
-        // Blend orange-red with dark orange for smoother transition
-        return hexToRgba('#FF6B00', 255); // Dark Orange-Red
-      }
-
-      // Rest of bottom: Brown gradient based on depth
-      // HORIZONTAL texture variation: Use raw signal value to create horizontal bands/stripes
-      // This creates texture that varies horizontally (across time/packets) rather than vertically
-
-      // Use raw signal value to create horizontal texture variation
-      // Higher raw values = lighter brown, lower raw values = darker brown
-      const signalInfluence = (raw - 20) / Math.max(maxSignal - 20, 1); // Normalize to 0-1
-
-      // Calculate depth ratio (how deep into bottom area)
-      const maxBottomDepth = allDepthValues.length - bottomStartIndex;
-      const depthRatio = maxBottomDepth > 0 ? bottomDepthOffset / maxBottomDepth : 0;
-
-      // Combine depth-based gradient with signal-based horizontal texture
-      // Signal influence creates horizontal variation, depth ratio creates vertical gradient
-      const textureWeight = 0.15; // How much horizontal texture affects the color (15%)
-      const finalRatio = Math.max(0, Math.min(1, depthRatio + signalInfluence * textureWeight));
-
-      // Brown gradient (like in screenshot)
-      if (finalRatio < 0.25) {
-        // Just below boundary: Dark Orange to Sandy Brown
-        const darkOrange = hexToRgba('#FF8C00');
-        const sandyBrown = hexToRgba('#CD853F');
-        return lerpColor(darkOrange, sandyBrown, finalRatio / 0.25);
-      } else if (finalRatio < 0.5) {
-        // Middle bottom: Sandy Brown to Chocolate
-        const sandyBrown = hexToRgba('#CD853F');
-        const chocolate = hexToRgba('#D2691E');
-        return lerpColor(sandyBrown, chocolate, (finalRatio - 0.25) / 0.25);
-      } else if (finalRatio < 0.75) {
-        // Lower bottom: Chocolate to Saddle Brown
-        const chocolate = hexToRgba('#D2691E');
-        const saddleBrown = hexToRgba('#8B4513');
-        return lerpColor(chocolate, saddleBrown, (finalRatio - 0.5) / 0.25);
-      } else {
-        // Deep bottom: Saddle Brown to Dark Brown
-        const saddleBrown = hexToRgba('#8B4513');
-        const darkBrown = hexToRgba('#654321');
-        return lerpColor(saddleBrown, darkBrown, (finalRatio - 0.75) / 0.25);
-      }
+      return lerpColor(lightBrown, veryDarkBrown, normalizedSignal);
     } else {
       // ABOVE BOTTOM AREA: Check if signal is higher than average
       const difference = raw - aboveBottomAverage;
@@ -559,10 +546,10 @@ export function signalToColorT03Average(
         // 4-stage gradient: Dark Yellow → Bright Yellow → Lime Green → Bright Green
         const excessRatio = Math.min(1, (raw - minFishThreshold) / Math.max(minFishThreshold, 10));
 
-        const darkYellow = hexToRgba('#CCB800');    // Stage 1: Dark Yellow (weak fish)
-        const brightYellow = hexToRgba('#FFFF00');  // Stage 2: Bright Yellow (moderate fish)
-        const limeGreen = hexToRgba('#32CD32');     // Stage 3: Lime Green (strong fish)
-        const brightGreen = hexToRgba('#00FF00');   // Stage 4: Bright Green (very strong fish)
+        const darkYellow = hexToRgba("#CCB800"); // Stage 1: Dark Yellow (weak fish)
+        const brightYellow = hexToRgba("#FFFF00"); // Stage 2: Bright Yellow (moderate fish)
+        const limeGreen = hexToRgba("#9acb9aff"); // Stage 3: Lime Green (strong fish)
+        const brightGreen = hexToRgba("#ffffffff"); // Stage 4: Bright Green (very strong fish)
 
         if (excessRatio > 0.75) {
           // Stage 4: Very strong fish (Lime Green → Bright Green)
@@ -578,14 +565,14 @@ export function signalToColorT03Average(
           return lerpColor(darkYellow, brightYellow, t);
         } else {
           // Stage 1: Weak fish (Dark Yellow with varying intensity)
-          const alpha = Math.floor(150 + excessRatio / 0.25 * 105); // 150-255 alpha
+          const alpha = Math.floor(150 + (excessRatio / 0.25) * 105); // 150-255 alpha
           return { r: darkYellow.r, g: darkYellow.g, b: darkYellow.b, a: alpha };
         }
       } else if (difference > 0) {
         // Slightly above average but not fish: darker, more transparent yellow
         // ADJUSTED: Reduced alpha values to make these signals less prominent
         const alpha = Math.min(100, Math.floor((raw / minFishThreshold) * 80));
-        return { r: 200, g: 200, b: 0, a: alpha }; // Darker yellow, lower alpha
+        return { r: 20, g: 20, b: 0, a: alpha }; // Darker yellow, lower alpha
       } else {
         // BELOW AVERAGE: Background/weak signals
         // ADJUSTED: Further reduced alpha values for cleaner background
@@ -598,7 +585,7 @@ export function signalToColorT03Average(
         } else {
           // Well below average: Very transparent (background)
           const alpha = Math.max(10, 40 - Math.floor(deficitRatio * 30)); // Reduced opacity
-          return { r: 20, g: 20, b: 20, a: alpha };
+          return { r: 7, g: 7, b: 7, a: alpha };
         }
       }
     }
@@ -608,17 +595,37 @@ export function signalToColorT03Average(
   const clampedDepth = Math.max(0, Math.min(89, Math.floor(depthIndex)));
   const average = T03_DEPTH_AVERAGES[clampedDepth];
 
-  if (raw > average + 10) {
-    // High signal: Orange/Brown (bottom)
-    const excessRatio = Math.min(1, (raw - average - 10) / 30);
-    const orange = hexToRgba('#FF8C00');
-    const brown = hexToRgba('#8B4513');
+  // IMPORTANT: Increased thresholds to prevent excessive yellow/green from noise
+  // Original thresholds were too low (average+5, average+10) causing all noise to appear yellow
+  // New thresholds require much stronger signals to trigger fish/bottom colors
+
+  if (raw > average + 30) {
+    // Very high signal: Orange/Brown (bottom)
+    // Only values significantly above average (30+) are considered bottom
+    const excessRatio = Math.min(1, (raw - average - 30) / 30);
+    const orange = hexToRgba("#FF8C00");
+    const brown = hexToRgba("#8B4513");
     return lerpColor(orange, brown, excessRatio);
+  } else if (raw > average + 20) {
+    // High signal: Green/Yellow (fish)
+    // Requires 20+ above average to be considered fish
+    const excessRatio = Math.min(1, (raw - average - 20) / 10);
+    const darkYellow = hexToRgba("#CCB800");
+    const brightYellow = hexToRgba("#FFFF00");
+    return lerpColor(darkYellow, brightYellow, excessRatio);
+  } else if (raw > average + 10) {
+    // Moderate signal: Semi-transparent yellow
+    // 10-20 above average shows as faint yellow
+    const alpha = Math.floor(((raw - average - 10) / 10) * 120);
+    return { r: 20, g: 20, b: 0, a: alpha };
+  } else if (raw > average + 5) {
+    // Slightly above average: Very faint gray
+    // 5-10 above average shows as barely visible
+    const alpha = Math.floor(((raw - average - 5) / 5) * 60);
+    return { r: 60, g: 60, b: 60, a: alpha };
   } else {
-    // Near average: Green gradient
-    const deviation = Math.abs(raw - average);
-    const alpha = Math.max(100, 255 - deviation * 20);
-    return { r: 50, g: 200, b: 50, a: alpha };
+    // Below average + 5: Transparent (background)
+    return { r: 0, g: 0, b: 0, a: 0 };
   }
 }
 
