@@ -1,14 +1,14 @@
 import { useRef, useEffect } from "react";
 import { ParsedPacket } from "../utils/csvParser";
 import { createRenderPacket } from "../utils/sonarDataConverter";
-import { signalToColor, signalToColorIceFishing, getBottomHighlightColor, getBottomTextureColor } from "../utils/colorMapping";
+import { signalToColorIceFishing, signalToColorT03Average } from "../utils/colorMapping";
 
 interface RadarCanvasProps {
   currentPacket: ParsedPacket | null;
   packets: ParsedPacket[];
   currentIndex: number;
   resolutionMode: "144" | "360" | "720";
-  colorMode: "standard" | "iceFishing";
+  colorMode: "iceFishing" | "t03Average";
   width?: number;
   height?: number;
 }
@@ -42,6 +42,15 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
     const effectiveDepthSamples = depthSamples - START_DEPTH;
     const downsample = Math.max(1, Math.floor(effectiveDepthSamples / MAX_RENDER_PIXELS));
 
+    // For T03Average mode: convert all depth values to raw for color mapping
+    // IMPORTANT: Use ORIGINAL 90 samples, not expanded renderData
+    let rawDepthValues: number[] | undefined;
+
+    if (colorMode === "t03Average") {
+      // Convert original 90 samples to raw values
+      rawDepthValues = packet.scanData.map(sample => sample);
+    }
+
     // ====================================================================
     // Render each depth with pure data colors (START_DEPTH부터 시작)
     // ====================================================================
@@ -50,9 +59,6 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
       for (let i = 0; i < downsample && d + i < depthSamples; i++) {
         maxSignal = Math.max(maxSignal, renderData[d + i]);
       }
-
-      // Adjust depthRatio to be relative to the visible range (START_DEPTH to depthSamples)
-      const depthRatio = (d - START_DEPTH) / effectiveDepthSamples;
 
       const signal = Math.max(0, Math.min(255, maxSignal));
 
@@ -68,8 +74,18 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
           const x = xPosition + px;
           if (x < 0 || x >= width) continue;
 
-          // Apply color mapping (pure data only)
-          const finalColor = colorMode === "iceFishing" ? signalToColorIceFishing(signal) : signalToColor(signal, depthRatio);
+          // Apply color mapping based on color mode
+          let finalColor;
+          if (colorMode === "iceFishing") {
+            finalColor = signalToColorIceFishing(signal);
+          } else {
+            // T03 Average 모드: signal을 raw로 변환하고 전체 깊이 값 배열 전달
+            const raw = signal / 3.2;
+            // Map screen depth index (d) to original 90-sample index
+            const originalDepthIndex = Math.floor((d / depthSamples) * 90);
+            // Pass all raw depth values for bottom detection and average calculation
+            finalColor = signalToColorT03Average(raw, originalDepthIndex, rawDepthValues);
+          }
 
           // Write final color to pixel data
           const index = (drawY * width + x) * 4;
@@ -102,7 +118,7 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
       const imageData = ctx.createImageData(width, height);
       const pixelData = imageData.data;
 
-      // Fill with background color (black for standard, white for ice fishing)
+      // Fill with background color (black for standard/t03Average, white for ice fishing)
       const bgColor = colorMode === "iceFishing" ? 255 : 0;
       for (let i = 0; i < pixelData.length; i += 4) {
         pixelData[i] = bgColor;
