@@ -52,7 +52,7 @@ function lerpColor(color1: ColorRGBA, color2: ColorRGBA, t: number): ColorRGBA {
  * @param raw - Raw signal value (0-80)
  * @param depthRatio - Depth ratio (0=surface, 1=bottom) for background gradient
  */
-export function getColorForRawSignal(raw: number, depthRatio: number = 0.5): ColorRGBA {
+export function getColorForRawSignal(raw: number, _depthRatio: number = 0.5): ColorRGBA {
   // ====================================================================
   // STEP 1: Raw 값 클램핑 (0-80 범위)
   // ====================================================================
@@ -408,7 +408,6 @@ export function signalToColorT03Average(
       // If bottom found, find where it ends (signal drops back to low levels)
       if (bottomStartIndex !== -1) {
         for (let i = bottomStartIndex + 1; i < allDepthValues.length; i++) {
-          const val = allDepthValues[i];
           // Bottom ends when signal drops below 50% of BOTTOM_THRESHOLD for 3+ consecutive samples
           if (i < allDepthValues.length - 2) {
             const current = allDepthValues[i];
@@ -433,11 +432,6 @@ export function signalToColorT03Average(
     // It will have similar signal characteristics to the first bottom
     // ====================================================================
     if (bottomStartIndex !== -1 && bottomEndIndex !== -1) {
-      const bottomThickness = bottomEndIndex - bottomStartIndex;
-      // Estimate where second reflection might appear
-      // It should be roughly bottomEndIndex + bottomStartIndex distance
-      const expectedSecondReflectionStart = bottomEndIndex + bottomStartIndex;
-
       // Look for second reflection in the range [1.5x to 2.5x bottom depth]
       const searchStart = Math.floor(bottomEndIndex + bottomStartIndex * 0.5);
       const searchEnd = Math.min(allDepthValues.length, Math.floor(bottomEndIndex + bottomStartIndex * 1.5));

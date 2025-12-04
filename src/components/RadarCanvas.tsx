@@ -1,7 +1,7 @@
 import { useRef, useEffect } from "react";
 import { ParsedPacket } from "../utils/csvParser";
 import { createRenderPacket } from "../utils/sonarDataConverter";
-import { signalToColor, signalToColorIceFishing, signalToColorT03Average, getBottomHighlightColor, getBottomTextureColor } from "../utils/colorMapping";
+import { signalToColorIceFishing, signalToColorT03Average, getBottomHighlightColor } from "../utils/colorMapping";
 
 interface RadarCanvasProps {
   currentPacket: ParsedPacket | null;
