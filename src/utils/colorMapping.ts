@@ -297,24 +297,10 @@ export function signalToColorT03Average(
   depthIndex: number,
   allDepthValues?: number[]
 ): ColorRGBA {
-  // Step 1: Special value filtering - 80 is "out of range" marker
-  // ✅ SKIP: Bottom area will handle 80 values with brown gradient
-  // if (raw >= 79.5) {
-  //   return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent (invalid data)
-  // }
-
-  // Step 2: Noise filtering - values below 0.5 are transparent
-  if (raw < 0.5) {
-    return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent
-  }
-
-  // Step 3: Very weak signals (0.5 ~ 2.0) - semi-transparent dark
-  if (raw < 2.0) {
-    const alpha = Math.floor(((raw - 0.5) / 1.5) * 80); // 0-80 alpha
-    return { r: 7, g: 7, b: 7, a: alpha };
-  }
-
-  // Step 3: If we have depth values, use bottom-relative strategy
+  // ====================================================================
+  // STEP 1: BOTTOM DETECTION FIRST (before noise filtering)
+  // 바닥 영역이면 raw 값이 0이어도 바닥 색상으로 처리해야 함
+  // ====================================================================
   if (allDepthValues && allDepthValues.length > 0) {
     // ====================================================================
     // STEP 3.1: FIND BOTTOM START INDEX
@@ -343,91 +329,120 @@ export function signalToColorT03Average(
     const BOTTOM_THRESHOLD = Math.max(p90, maxSignal * 0.75);
 
     // ====================================================================
-    // STEP 3.1A: DETECT AND MARK SECOND REFLECTION (MULTIPATH) AREA
-    // Second reflection occurs when sonar signal bounces between bottom and surface
-    // It appears at approximately 2x the actual bottom depth
+    // STEP 3.1A: NEW BOTTOM DETECTION LOGIC (Dual Condition Strategy)
+    //
+    // Condition 1: 값 >= 30 이면서 다음에 70~80이 오면 → 바닥 시작
+    // Condition 2: 물 영역 평균 대비 훨씬 높은 값 (30+)이 연속되면 → 바닥
     // ====================================================================
 
-    // Find where bottom starts: look for sudden signal jump OR appearance of 80 values
-    // Strategy: Bottom zone is indicated by:
-    //   1. Appearance of 80 (0x50) values - these mark the sonar range limit
-    //   2. Look backwards from first 80 to find where strong signal started
-    //   3. OR sustained high signal above threshold (if no 80 values)
     let bottomStartIndex = -1;
-    let bottomEndIndex = -1; // Track where bottom region ends
-    let secondReflectionStartIndex = -1; // Track second reflection start
+    let bottomEndIndex = -1;
+    let secondReflectionStartIndex = -1;
 
-    // Find the FIRST consecutive group of 80 values (minimum 4 in a row)
-    // This filters out isolated 80 noise values
-    let first80Index = -1;
-    let consecutiveCount = 0;
-
+    // Calculate water column average (values < 30, excluding 80)
+    // This represents the "noise floor" of the water area
+    let waterSum = 0;
+    let waterCount = 0;
     for (let i = 0; i < allDepthValues.length; i++) {
-      if (allDepthValues[i] >= 79.5) {
-        consecutiveCount++;
-        if (consecutiveCount >= 4) {
-          // Found 4 consecutive 80 values - mark the start of this group
-          first80Index = i - 3; // Start index of the 4-value group
-          break;
-        }
-      } else {
-        consecutiveCount = 0;
+      const val = allDepthValues[i];
+      if (val < 30 && val < 80) {
+        waterSum += val;
+        waterCount++;
       }
     }
+    const waterAverage = waterCount > 0 ? waterSum / waterCount : 2;
 
-    if (first80Index !== -1) {
-      // Found 80 values - look backwards to find where strong signal started
-      // The bottom typically starts 1-3 samples before the first 80
-      bottomStartIndex = first80Index;
+    // Thresholds for bottom detection
+    const STRONG_SIGNAL_THRESHOLD = 30; // 강한 신호 기준
+    const NEAR_MAX_THRESHOLD = 70; // 80에 가까운 값 기준
 
-      // Look backwards for the start of the strong signal
-      for (let i = first80Index - 1; i >= Math.max(0, first80Index - 5); i--) {
-        const val = allDepthValues[i];
-        // If we find a value significantly above average water column noise (>20), use that
-        if (val > 20 && val < 80) {
+    // ====================================================================
+    // Strategy: Find bottom using dual conditions
+    // ====================================================================
+    for (let i = 0; i < allDepthValues.length - 1; i++) {
+      const current = allDepthValues[i];
+      const next = allDepthValues[i + 1];
+
+      // Skip already high values (we're looking for the START of bottom)
+      if (current >= 80) continue;
+
+      // ------------------------------------------------------------------
+      // Condition 1: 값 >= 30 이면서 다음에 70~80이 오면 → 바닥 시작
+      // Pattern: [... 0, 2, 18, 74, 80, 80 ...] → 74 직전의 18 또는 74가 바닥 시작
+      // ------------------------------------------------------------------
+      if (current >= STRONG_SIGNAL_THRESHOLD && next >= NEAR_MAX_THRESHOLD) {
+        bottomStartIndex = i;
+        break;
+      }
+
+      // ------------------------------------------------------------------
+      // Condition 2: 물 영역 평균 대비 훨씬 높은 값 (30+)이 연속되면 → 바닥
+      // Check if current and next are both significantly above water average
+      // ------------------------------------------------------------------
+      if (i < allDepthValues.length - 2) {
+        const next2 = allDepthValues[i + 2];
+
+        // All three values are >= 30 (significantly above water average of 0~5)
+        if (current >= STRONG_SIGNAL_THRESHOLD &&
+            next >= STRONG_SIGNAL_THRESHOLD &&
+            next2 >= STRONG_SIGNAL_THRESHOLD) {
           bottomStartIndex = i;
           break;
         }
       }
 
-      // Bottom ends at first 80 value
-      bottomEndIndex = first80Index;
-    } else {
-      // No 80 values found, look for sustained high signal (original logic)
-      for (let i = 0; i < allDepthValues.length - 2; i++) {
+      // ------------------------------------------------------------------
+      // Condition 1b: Look ahead - if next few values contain 70~80,
+      // and current is rising significantly above water average
+      // ------------------------------------------------------------------
+      if (current >= STRONG_SIGNAL_THRESHOLD - 10 && current > waterAverage * 5) {
+        // Check if 70~80 appears within next 3 samples
+        let hasNearMax = false;
+        for (let j = 1; j <= 3 && i + j < allDepthValues.length; j++) {
+          if (allDepthValues[i + j] >= NEAR_MAX_THRESHOLD) {
+            hasNearMax = true;
+            break;
+          }
+        }
+        if (hasNearMax) {
+          bottomStartIndex = i;
+          break;
+        }
+      }
+    }
+
+    // If bottom found, determine bottom end index
+    if (bottomStartIndex !== -1) {
+      // Find where bottom region ends
+      // Bottom ends when we see low values (< 10) for 3+ consecutive samples after the peak
+      let peakIndex = bottomStartIndex;
+
+      // First, find the peak (highest signal or first 80)
+      for (let i = bottomStartIndex; i < Math.min(bottomStartIndex + 10, allDepthValues.length); i++) {
+        if (allDepthValues[i] >= 80) {
+          peakIndex = i;
+          break;
+        }
+        if (allDepthValues[i] > allDepthValues[peakIndex]) {
+          peakIndex = i;
+        }
+      }
+
+      // Bottom region extends from bottomStartIndex to where signal drops back to noise level
+      bottomEndIndex = peakIndex;
+      for (let i = peakIndex + 1; i < allDepthValues.length - 2; i++) {
         const current = allDepthValues[i];
         const next1 = allDepthValues[i + 1];
         const next2 = allDepthValues[i + 2];
 
-        // Skip if any value is 80
-        if (current >= 80 || next1 >= 80 || next2 >= 80) {
-          continue;
+        // If we're still seeing high values (including 80), extend bottom
+        if (current >= 30 || current >= 80) {
+          bottomEndIndex = i;
         }
 
-        // Check if current and next 2 samples are all above threshold
-        if (current > BOTTOM_THRESHOLD && next1 > BOTTOM_THRESHOLD && next2 > BOTTOM_THRESHOLD) {
-          bottomStartIndex = i;
+        // Bottom ends when 3 consecutive low values appear
+        if (current < 10 && next1 < 10 && next2 < 10) {
           break;
-        }
-      }
-
-      // If bottom found, find where it ends (signal drops back to low levels)
-      if (bottomStartIndex !== -1) {
-        for (let i = bottomStartIndex + 1; i < allDepthValues.length; i++) {
-          // Bottom ends when signal drops below 50% of BOTTOM_THRESHOLD for 3+ consecutive samples
-          if (i < allDepthValues.length - 2) {
-            const current = allDepthValues[i];
-            const next1 = allDepthValues[i + 1];
-            const next2 = allDepthValues[i + 2];
-            if (current < BOTTOM_THRESHOLD * 0.5 && next1 < BOTTOM_THRESHOLD * 0.5 && next2 < BOTTOM_THRESHOLD * 0.5) {
-              bottomEndIndex = i;
-              break;
-            }
-          }
-        }
-        // If no clear end, assume bottom extends to end of data
-        if (bottomEndIndex === -1) {
-          bottomEndIndex = allDepthValues.length - 1;
         }
       }
     }
@@ -492,7 +507,7 @@ export function signalToColorT03Average(
     // DEBUG: Log values for first pixel only (to avoid spam)
     if (depthIndex === 0) {
       console.log("[T03Average Debug]", {
-        first80Index,
+        waterAverage,
         bottomStartIndex,
         bottomEndIndex,
         secondReflectionStartIndex,
@@ -533,7 +548,19 @@ export function signalToColorT03Average(
 
       return lerpColor(lightBrown, veryDarkBrown, normalizedSignal);
     } else {
-      // ABOVE BOTTOM AREA: Check if signal is higher than average
+      // ABOVE BOTTOM AREA: Apply noise filtering first
+      // Noise filtering - values below 0.5 are transparent
+      if (raw < 0.5) {
+        return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent
+      }
+
+      // Very weak signals (0.5 ~ 2.0) - semi-transparent dark
+      if (raw < 2.0) {
+        const alpha = Math.floor(((raw - 0.5) / 1.5) * 80); // 0-80 alpha
+        return { r: 7, g: 7, b: 7, a: alpha };
+      }
+
+      // Check if signal is higher than average
       const difference = raw - aboveBottomAverage;
 
       // Fish/Lure detection: Signal must be significantly higher than average
@@ -589,6 +616,15 @@ export function signalToColorT03Average(
         }
       }
     }
+  }
+
+  // Fallback: Apply noise filtering first
+  if (raw < 0.5) {
+    return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent
+  }
+  if (raw < 2.0) {
+    const alpha = Math.floor(((raw - 0.5) / 1.5) * 80);
+    return { r: 7, g: 7, b: 7, a: alpha };
   }
 
   // Fallback: Use old depth-based average method
