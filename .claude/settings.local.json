@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python analyze_all_packets.py:*)",
       "Bash(python:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

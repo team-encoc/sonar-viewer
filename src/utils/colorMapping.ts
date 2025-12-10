@@ -1,9 +1,300 @@
 /**
  * Color Mapping Utilities for Sonar Radar Display (Web Version)
- * Environmental-based color palette for raw signal range 0-80
+ * Environmental-based color palette for raw signal range 0-255
  * Uses continuous gradient interpolation for smooth color transitions
  * With visual enhancements: depth gradient, fish highlighting, bottom emphasis
  */
+
+/**
+ * Maximum raw signal value from hardware
+ * Updated from 80 to 255 to support new hardware capability
+ */
+export const MAX_RAW_SIGNAL = 255;
+
+// ============================================================================
+// KALMAN FILTER FOR BOTTOM TRACKING
+// 바닥 깊이 추적을 위한 칼만 필터 - 바닥 구멍(dropout) 문제 해결
+// ============================================================================
+
+class BottomKalmanFilter {
+  private x: number = -1; // 상태 (바닥 깊이 인덱스)
+  private P: number = 1; // 추정 오차
+  private Q: number = 0.0001; // 프로세스 노이즈 - 더 낮춤 (바닥은 거의 안 변함)
+  private R: number = 0.5; // 측정 노이즈 - 더 높임 (측정 불신)
+  private initialized: boolean = false;
+  private stableCount: number = 0; // 안정화 카운터
+
+  update(measurement: number, confidence: number): number {
+    // 첫 번째 유효한 측정값으로 초기화
+    if (!this.initialized && measurement > 0 && confidence > 0.3) {
+      this.x = measurement;
+      this.initialized = true;
+      this.stableCount = 0;
+      return this.x;
+    }
+
+    // 초기화 안됐으면 측정값 그대로 반환
+    if (!this.initialized) {
+      return measurement > 0 ? measurement : -1;
+    }
+
+    // 측정값이 없거나 신뢰도 낮으면 예측만 사용
+    if (measurement <= 0 || confidence < 0.3) {
+      // 예측 단계만 (측정 업데이트 없음)
+      this.P += this.Q;
+      return Math.round(this.x);
+    }
+
+    // 급격한 변화 감지 (바닥은 물리적으로 급변하지 않음)
+    // 프레임당 최대 2 인덱스 변화 허용 (3→2로 더 엄격하게)
+    const maxPhysicalChange = 2;
+    const diff = Math.abs(measurement - this.x);
+
+    if (diff > maxPhysicalChange) {
+      // 비정상적 변화 → 측정 오류로 간주, 예측값 사용
+      // 단, 연속으로 같은 방향으로 변화하면 점진적으로 반영
+      this.stableCount = 0;
+      this.P += this.Q;
+      return Math.round(this.x);
+    }
+
+    // 안정적인 측정이 반복되면 신뢰도 높임
+    this.stableCount = Math.min(10, this.stableCount + 1);
+    const stabilityBonus = this.stableCount / 10; // 0~1
+
+    // 신뢰도에 따라 측정 노이즈 조정 (안정화될수록 측정 신뢰)
+    const adjustedR = this.R / (confidence * (1 + stabilityBonus));
+
+    // 예측 단계
+    this.P += this.Q;
+
+    // 업데이트 단계
+    const K = this.P / (this.P + adjustedR); // 칼만 이득
+    this.x += K * (measurement - this.x); // 상태 업데이트
+    this.P *= 1 - K; // 오차 업데이트
+
+    return Math.round(this.x);
+  }
+
+  reset(): void {
+    this.x = -1;
+    this.P = 1;
+    this.initialized = false;
+    this.stableCount = 0;
+  }
+
+  getState(): number {
+    return this.initialized ? Math.round(this.x) : -1;
+  }
+}
+
+// 전역 칼만 필터 인스턴스 (컬럼별로 관리)
+const bottomKalmanFilters: Map<number, BottomKalmanFilter> = new Map();
+
+/**
+ * Get or create Kalman filter for a specific column
+ */
+function getBottomKalmanFilter(columnIndex: number): BottomKalmanFilter {
+  if (!bottomKalmanFilters.has(columnIndex)) {
+    bottomKalmanFilters.set(columnIndex, new BottomKalmanFilter());
+  }
+  return bottomKalmanFilters.get(columnIndex)!;
+}
+
+/**
+ * Reset all Kalman filters (call when loading new file)
+ */
+export function resetBottomTracking(): void {
+  bottomKalmanFilters.clear();
+}
+
+/**
+ * Calculate confidence based on signal strength
+ * 200+ = 높은 신뢰도, 100 이하 = 낮은 신뢰도
+ */
+function calculateBottomConfidence(signalStrength: number): number {
+  if (signalStrength >= 200) return 1.0;
+  if (signalStrength >= 150) return 0.8;
+  if (signalStrength >= 100) return 0.5;
+  if (signalStrength >= 50) return 0.2;
+  return 0;
+}
+
+// ============================================================================
+// TVG (Time Varied Gain) - 깊이에 따른 신호 감쇠 보정
+// 음파는 거리가 멀어질수록 약해짐 (확산 손실 + 흡수 손실)
+// ============================================================================
+
+/**
+ * 흡수 계수 (주파수 의존)
+ * 675kHz: 약 0.15 dB/m (담수 기준)
+ * 200kHz: 약 0.05 dB/m
+ */
+const ABSORPTION_COEFF = 0.15; // dB/m for 675kHz
+
+/**
+ * TVG 보정 적용
+ * 깊이에 따른 신호 감쇠를 보상하여 같은 크기의 물고기가 같은 신호 강도를 갖게 함
+ *
+ * @param raw - 원본 신호 값 (0-255)
+ * @param depthIndex - 깊이 인덱스 (0-89)
+ * @param totalDepth - 전체 깊이 (미터, 기본 10m)
+ * @returns TVG 보정된 신호 값
+ */
+function applyTVG(raw: number, depthIndex: number, totalDepth: number = 10): number {
+  // 0으로 나누기 방지 및 표면 근처 처리
+  if (depthIndex <= 0 || raw <= 0) return raw;
+
+  // 깊이 인덱스를 실제 깊이(미터)로 변환
+  const depth = (depthIndex / 90) * totalDepth;
+  if (depth < 0.5) return raw; // 0.5m 미만은 보정 불필요
+
+  // 확산 손실: 20 * log10(depth) dB
+  // 실제로는 2-way path이므로 40 * log10(depth)이지만,
+  // 소나 데이터는 이미 일부 보정되어 있을 수 있으므로 20으로 사용
+  const spreadingLoss = 20 * Math.log10(depth);
+
+  // 흡수 손실: absorption_coeff * depth dB
+  const absorptionLoss = ABSORPTION_COEFF * depth;
+
+  // 총 손실 (dB)
+  const totalLoss = spreadingLoss + absorptionLoss;
+
+  // dB를 선형 배율로 변환하여 보정
+  // 10^(loss/20) = 보정 배율
+  const compensation = Math.pow(10, totalLoss / 20);
+
+  // 보정 적용 (최대값 제한)
+  const compensated = raw * compensation;
+
+  // 0-255 범위 유지, 하지만 내부 계산용으로는 더 큰 값 허용
+  return Math.min(1000, compensated); // 내부 처리용 최대값
+}
+
+/**
+ * 노이즈 플로어 계산
+ * 바닥 위 물 컬럼에서 하위 20% 신호의 평균
+ *
+ * @param columnData - 컬럼의 모든 깊이 값 (TVG 보정 후)
+ * @param bottomIndex - 바닥 시작 인덱스 (-1이면 전체 사용)
+ * @returns 노이즈 플로어 값
+ */
+function calculateNoiseFloor(columnData: number[], bottomIndex: number): number {
+  // 바닥 위 데이터만 사용
+  const waterColumn = bottomIndex > 0 ? columnData.slice(0, bottomIndex) : columnData;
+
+  if (waterColumn.length === 0) return 1; // 0으로 나누기 방지
+
+  // 정렬하여 하위 20% 평균 계산
+  const sorted = [...waterColumn].sort((a, b) => a - b);
+  const lower20Count = Math.max(1, Math.floor(sorted.length * 0.2));
+  const lower20 = sorted.slice(0, lower20Count);
+
+  const noiseFloor = lower20.reduce((a, b) => a + b, 0) / lower20.length;
+
+  // 최소값 보장 (0으로 나누기 방지)
+  return Math.max(1, noiseFloor);
+}
+
+/**
+ * SNR (Signal-to-Noise Ratio) 계산
+ *
+ * @param tvgSignal - TVG 보정된 신호 값
+ * @param noiseFloor - 노이즈 플로어 값
+ * @returns SNR 값 (1.0 = 노이즈 수준, 3.0+ = 강한 타겟)
+ */
+function calculateSNR(tvgSignal: number, noiseFloor: number): number {
+  return tvgSignal / Math.max(1, noiseFloor);
+}
+
+// ============================================================================
+// DEEPER STYLE COLOR MAPPING (Option A)
+// SNR 기반 연속 그라데이션: 어두운 노랑 → 밝은 노랑 → 연두 → 밝은 녹색 → 흰색
+// ============================================================================
+
+/**
+ * Deeper 스타일 어군 색상 매핑 (실제 Deeper 앱 기반)
+ * SNR 값에 따라 연속적인 그라데이션 적용
+ *
+ * 디퍼 실제 색상 분석:
+ * - 약한 신호: 어두운 올리브/노랑 (#808000 ~ #B8860B)
+ * - 중간 신호: 밝은 노랑 (#FFD700 ~ #FFFF00)
+ * - 강한 신호: 연두/녹색 (#ADFF2F ~ #00FF00)
+ * - 매우 강한: 밝은 녹색/민트 (#00FF7F ~ #7FFFD4)
+ *
+ * @param snr - Signal-to-Noise Ratio 값
+ * @returns ColorRGBA 색상 객체
+ */
+function getFishColorDeeper(snr: number): ColorRGBA {
+  // SNR 3 미만: 투명 (노이즈)
+  if (snr < 3.0) {
+    return { r: 0, g: 0, b: 0, a: 0 };
+  }
+
+  // SNR 3~5: 어두운 올리브/노랑 (약한 신호)
+  if (snr < 5.0) {
+    const t = (snr - 3.0) / 2.0;
+    return {
+      r: Math.floor(128 + t * 56), // 128 → 184 (올리브 → 다크골드)
+      g: Math.floor(128 + t * 6), // 128 → 134
+      b: 0,
+      a: Math.floor(150 + t * 55), // 150 → 205
+    };
+  }
+
+  // SNR 5~8: 다크골드 → 밝은 노랑 (중약 신호)
+  if (snr < 8.0) {
+    const t = (snr - 5.0) / 3.0;
+    return {
+      r: Math.floor(184 + t * 71), // 184 → 255
+      g: Math.floor(134 + t * 81), // 134 → 215
+      b: 0,
+      a: 255,
+    };
+  }
+
+  // SNR 8~12: 밝은 노랑 → 연두 (중간 신호)
+  if (snr < 12.0) {
+    const t = (snr - 8.0) / 4.0;
+    return {
+      r: Math.floor(255 - t * 82), // 255 → 173 (노랑 → 연두)
+      g: Math.floor(215 + t * 40), // 215 → 255
+      b: Math.floor(t * 47), // 0 → 47
+      a: 255,
+    };
+  }
+
+  // SNR 12~20: 연두 → 밝은 녹색 (강한 신호)
+  if (snr < 20.0) {
+    const t = (snr - 12.0) / 8.0;
+    return {
+      r: Math.floor(173 - t * 173), // 173 → 0
+      g: 255,
+      b: Math.floor(47 + t * 80), // 47 → 127
+      a: 255,
+    };
+  }
+
+  // SNR 20~35: 밝은 녹색 → 민트/청록 (매우 강한 신호)
+  if (snr < 35.0) {
+    const t = (snr - 20.0) / 15.0;
+    return {
+      r: Math.floor(t * 127), // 0 → 127
+      g: 255,
+      b: Math.floor(127 + t * 85), // 127 → 212
+      a: 255,
+    };
+  }
+
+  // SNR 35+: 민트 → 거의 흰색 (바닥 근처 극강 신호)
+  const t = Math.min(1, (snr - 35.0) / 25.0);
+  return {
+    r: Math.floor(127 + t * 128), // 127 → 255
+    g: 255,
+    b: Math.floor(212 + t * 43), // 212 → 255
+    a: 255,
+  };
+}
 
 export interface ColorRGBA {
   r: number;
@@ -19,7 +310,7 @@ export interface ColorRGBA {
  */
 function hexToRgba(hex: string, alpha: number = 255): ColorRGBA {
   // Remove # if present
-  const cleanHex = hex.replace('#', '');
+  const cleanHex = hex.replace("#", "");
 
   const r = parseInt(cleanHex.substring(0, 2), 16);
   const g = parseInt(cleanHex.substring(2, 4), 16);
@@ -46,49 +337,60 @@ function lerpColor(color1: ColorRGBA, color2: ColorRGBA, t: number): ColorRGBA {
 }
 
 /**
- * Get color using continuous gradient interpolation for raw signal value (0-80 range)
+ * Get color using continuous gradient interpolation for raw signal value (0-255 range)
  * With visual enhancements for depth gradient and fish highlighting
  *
- * @param raw - Raw signal value (0-80)
+ * @param raw - Raw signal value (0-255)
  * @param depthRatio - Depth ratio (0=surface, 1=bottom) for background gradient
  */
 export function getColorForRawSignal(raw: number, _depthRatio: number = 0.5): ColorRGBA {
   // ====================================================================
-  // STEP 1: Raw 값 클램핑 (0-80 범위)
+  // STEP 1: Raw 값 클램핑 (0-255 범위)
   // ====================================================================
-  const clampedRaw = Math.max(0, Math.min(80, raw));
+  const clampedRaw = Math.max(0, Math.min(MAX_RAW_SIGNAL, raw));
 
   // ====================================================================
-  // STEP 2: 정규화 (0~80 → 0~1)
+  // STEP 2: 정규화 (0~255 → 0~1)
   // ====================================================================
-  const norm = clampedRaw / 80;
+  const norm = clampedRaw / MAX_RAW_SIGNAL;
 
   // ====================================================================
   // STEP 3: 연속형 그라데이션 컬러맵 적용
   // ====================================================================
   // 색상 기준점 정의 (Gradient Color Stops)
-  // 0-4: Black
-  // 5: Yellow
-  // 6-19: Black
-  // 20-21: Chartreuse (전환)
-  // 22-24: Bright Green (수중 신호)
-  // 25-27: Pale Green (약한 수중 신호)
-  // 28-48: Peru (바닥 중간)
-  // 49-64: Saddle Brown (바닥)
-  // 65-80: Dark Brown (바닥 깊이)
+  // 기존 80 기준 threshold를 255 기준으로 유지 (비율 동일)
+  // 0-12: Black
+  // 16: Yellow
+  // 17-60: Black
+  // 64-67: Chartreuse (전환)
+  // 70-77: Bright Green (수중 신호)
+  // 80-86: Pale Green (약한 수중 신호)
+  // 89-153: Peru (바닥 중간)
+  // 156-204: Saddle Brown (바닥)
+  // 207-255: Dark Brown (바닥 깊이)
   const colorStops = [
-    { threshold: 0.000, color: hexToRgba('#000000') },   // raw 0: Black (완전 빈 공간)
-    { threshold: 0.0125, color: hexToRgba('#000000') },  // raw 1: Pure Black ⬛
-    { threshold: 0.0625, color: hexToRgba('#001a33') },  // raw 5: Deep Navy Blue 🔵
-    { threshold: 0.125, color: hexToRgba('#FFFF00') },   // raw 10: Bright Yellow (물고기/루어) 🟡
-    { threshold: 0.1375, color: hexToRgba('#7FFF00') },  // raw 11: Chartreuse 🟢
-    { threshold: 0.20, color: hexToRgba('#ffffffff') },    // raw 16: Bright White 🟢
-    { threshold: 0.30, color: hexToRgba('#E0FFE0') },    // raw 24: Pale Green ⬜
-    { threshold: 0.375, color: hexToRgba('#E0FFE0') },   // raw 30: Pale Green ⬜
-    { threshold: 0.3875, color: hexToRgba('#D2691E') },  // raw 31: Chocolate Brown 🟫
-    { threshold: 0.60, color: hexToRgba('#CD853F') },    // raw 48: Peru 🟫
-    { threshold: 0.80, color: hexToRgba('#8B4513') },    // raw 64: Saddle Brown 🟫
-    { threshold: 1.00, color: hexToRgba('#654321') },    // raw 80: Dark Brown 🟫
+    { threshold: 0.0, color: hexToRgba("#000000") }, // raw 0: Black (완전 빈 공간)
+    { threshold: 0.0125, color: hexToRgba("#000000") }, // raw ~3: Pure Black ⬛
+    { threshold: 0.0625, color: hexToRgba("#001a33") }, // raw ~16: Deep Navy Blue 🔵
+    { threshold: 0.125, color: hexToRgba("#FFFF00") }, // raw ~32: Bright Yellow 🟡
+    { threshold: 0.1375, color: hexToRgba("#7FFF00") }, // raw ~35: Chartreuse 🟢
+    // ======== 8가지 색상 구간 (raw 36~51, 정규화 0.141~0.20) ========
+    { threshold: 0.141, color: hexToRgba("#FF0000") }, // raw 36: Red 🔴
+    { threshold: 0.149, color: hexToRgba("#FF8C00") }, // raw 38: Dark Orange 🟠
+    { threshold: 0.157, color: hexToRgba("#FFD700") }, // raw 40: Gold 🟡
+    { threshold: 0.165, color: hexToRgba("#00FF00") }, // raw 42: Lime Green 🟢
+    { threshold: 0.173, color: hexToRgba("#00FFFF") }, // raw 44: Cyan 🔵
+    { threshold: 0.181, color: hexToRgba("#0080FF") }, // raw 46: Azure Blue 🔵
+    { threshold: 0.189, color: hexToRgba("#8000FF") }, // raw 48: Purple 🟣
+    { threshold: 0.197, color: hexToRgba("#FF00FF") }, // raw 50: Magenta 🩷
+    // ======== 8가지 색상 구간 끝 ========
+    { threshold: 0.2, color: hexToRgba("#FFFFFF") }, // raw ~51: Bright White ⬜
+    { threshold: 0.3, color: hexToRgba("#E0FFE0") }, // raw ~77: Pale Green ⬜
+    { threshold: 0.375, color: hexToRgba("#E0FFE0") }, // raw ~96: Pale Green ⬜
+    { threshold: 0.3875, color: hexToRgba("#D2691E") }, // raw ~99: Chocolate Brown 🟫
+    { threshold: 0.6, color: hexToRgba("#CD853F") }, // raw ~153: Peru 🟫
+    { threshold: 0.8, color: hexToRgba("#8B4513") }, // raw ~204: Saddle Brown 🟫
+    { threshold: 1.0, color: hexToRgba("#654321") }, // raw 255: Dark Brown 🟫
   ];
 
   // ====================================================================
@@ -119,29 +421,29 @@ export function getColorForRawSignal(raw: number, _depthRatio: number = 0.5): Co
  */
 export function getBottomHighlightColor(): ColorRGBA {
   // 바닥선 강조: 밝은 갈색/황금색 테두리 효과
-  return hexToRgba('#D4AF37', 255); // Gold color
+  return hexToRgba("#D4AF37", 255); // Gold color
 }
 
 /**
  * Get bottom area color with texture variation based on raw signal
  * Creates subtle color variations to avoid flat 2D illustration look
  *
- * @param raw - Raw signal value (0-80) at this pixel
+ * @param raw - Raw signal value (0-255) at this pixel
  * @returns ColorRGBA with subtle texture variation
  */
 export function getBottomTextureColor(raw: number): ColorRGBA {
   // 기본 바닥색 (갈색 계열)
-  const baseColor = hexToRgba('#A8652E'); // Brown from color palette
+  const baseColor = hexToRgba("#A8652E"); // Brown from color palette
 
   // raw 값을 0~1로 정규화
-  const strength = Math.max(0, Math.min(1, raw / 80));
+  const strength = Math.max(0, Math.min(1, raw / MAX_RAW_SIGNAL));
 
   // 신호 강도에 따라 색상 변화 적용
   // 강한 신호(strength 높음): 더 어둡고 붉게
   // 약한 신호(strength 낮음): 기본색 유지
 
   // 어두워지는 효과 (최대 15%)
-  const darkenFactor = 1 - (strength * 0.15);
+  const darkenFactor = 1 - strength * 0.15;
 
   // 빨강 채널 강조 (최대 +20)
   const redBoost = strength * 20;
@@ -150,20 +452,21 @@ export function getBottomTextureColor(raw: number): ColorRGBA {
     r: Math.min(255, Math.round(baseColor.r * darkenFactor + redBoost)),
     g: Math.round(baseColor.g * darkenFactor),
     b: Math.round(baseColor.b * darkenFactor),
-    a: 255
+    a: 255,
   };
 }
 
 /**
  * Legacy function for compatibility with existing code
- * Converts amplified signal (0-256) to raw (0-80) and applies color mapping
+ * Converts amplified signal (0-256) to raw (0-255) and applies color mapping
  * @param signal - Amplified signal value (0-256)
  * @param depthRatio - Optional depth ratio for background gradient
  * @deprecated Use getColorForRawSignal with raw values instead
  */
 export function signalToColor(signal: number, depthRatio: number = 0.5): ColorRGBA {
-  // Convert amplified signal back to raw (reverse 3.2x gain)
-  const raw = signal / 3.2;
+  // With MAX_RAW_SIGNAL=255, signal and raw are now equivalent (no gain conversion needed)
+  // Clamp to MAX_RAW_SIGNAL for safety
+  const raw = Math.min(signal, MAX_RAW_SIGNAL);
   return getColorForRawSignal(raw, depthRatio);
 }
 
@@ -258,45 +561,35 @@ export function signalToColorIceFishing(signal: number): ColorRGBA {
 }
 
 /**
- * T03 Depth-based averages (AGGREGATE data from T03.md)
+ * Depth-based averages (AGGREGATE data from 675khz_with_Lure.csv)
  * This lookup table contains the average signal value for each depth index (0-89)
+ * Values are in raw 0-255 range from actual hardware data
  */
 const T03_DEPTH_AVERAGES: number[] = [
-  0.00, 0.02, 0.01, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02,
-  0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
-  4.19, 1.34, 1.34, 2.27, 1.58, 2.34, 2.51, 2.12, 2.10, 1.85,
-  2.71, 3.91, 7.02, 6.34, 7.58, 7.19, 6.76, 7.28, 7.15, 7.40,
-  11.27, 18.57, 32.69, 69.91, 79.74, 73.76, 67.83, 56.64, 52.94, 56.55,
-  57.64, 53.87, 54.94, 59.16, 58.84, 57.80, 60.30, 55.26, 54.47, 54.21,
-  34.84, 54.47, 38.19, 53.92, 31.84, 32.10, 37.69, 33.84, 35.56, 49.53,
-  31.31, 50.12, 49.46, 56.80, 44.31, 79.45, 79.92, 79.52, 77.69, 75.80,
-  68.05, 65.13, 62.41, 58.63, 59.17, 66.68, 66.44, 69.30, 68.06, 0.02
+  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.13, 0.82, 1.77, 29.73, 29.15, 33.49, 37.21, 40.51,
+  26.65, 3.1, 0.02, 0.02, 0.0, 0.03, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 2.09, 15.65, 22.78, 6.07, 4.35, 8.83, 115.36, 154.15, 174.72, 176.19, 212.57, 213.76, 209.98, 208.59, 15.23, 56.78,
+  7.61, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.46, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
 ];
 
 /**
  * T03 Average-based Color Mapping (Bottom-Relative Strategy)
+ * Enhanced with Kalman Filter for bottom tracking and physics-based 2nd reflection removal
  *
  * Strategy:
  * 1. Find bottom start depth (first depth with sustained high signals)
- * 2. Calculate average ONLY from above-bottom region (depth 0 to bottom-1)
- * 3. Fish/Lure = signals higher than above-bottom average
+ * 2. Apply Kalman filter to stabilize bottom depth (prevents dropout holes)
+ * 3. Remove 2nd reflection using physics-based prediction (depth × 2)
+ * 4. Calculate average ONLY from above-bottom region (depth 0 to bottom-1)
+ * 5. Fish/Lure = signals higher than above-bottom average
  *
- * Color mapping:
- * - Noise (< 0.5): Transparent
- * - Very weak (0.5-2.0): Semi-transparent dark
- * - Bottom area (high signals at/below bottom depth): Orange → Brown gradient
- * - Above average (fish/lure): Bright Green → Yellow gradient
- * - Below average: Dark/semi-transparent
- *
- * @param raw - Raw signal value (0-80)
+ * @param raw - Raw signal value (0-255)
  * @param depthIndex - Depth index (0-89)
  * @param allDepthValues - All raw values for current column (for calculating bottom & average)
+ * @param rawRangeMin - Minimum raw value for 8-color mapping (default: 0)
+ * @param rawRangeMax - Maximum raw value for 8-color mapping (default: 255)
+ * @param columnIndex - Column index for Kalman filter tracking (default: 0)
  */
-export function signalToColorT03Average(
-  raw: number,
-  depthIndex: number,
-  allDepthValues?: number[]
-): ColorRGBA {
+export function signalToColorT03Average(raw: number, depthIndex: number, allDepthValues?: number[], rawRangeMin: number = 0, rawRangeMax: number = 255, columnIndex: number = 0): ColorRGBA {
   // ====================================================================
   // STEP 1: BOTTOM DETECTION FIRST (before noise filtering)
   // 바닥 영역이면 raw 값이 0이어도 바닥 색상으로 처리해야 함
@@ -308,108 +601,197 @@ export function signalToColorT03Average(
     // ====================================================================
 
     // Calculate percentiles for dynamic thresholding
-    // IMPORTANT: Filter out 80 (0x50) as it's a special "out of range" marker, not real data
+    // IMPORTANT: Filter out MAX_RAW_SIGNAL (0xFF) as it's a special "out of range" marker, not real data
     const sortedValues = [...allDepthValues]
-      .filter((v) => v >= 2.0 && v < 80) // Exclude 80 (special value)
+      .filter((v) => v >= 2.0 && v < MAX_RAW_SIGNAL) // Exclude MAX_RAW_SIGNAL (special value)
       .sort((a, b) => a - b);
     const validCount = sortedValues.length;
 
+    // validCount가 0이어도 MAX_RAW_SIGNAL(255)이 있으면 바닥이 있을 수 있음
+    // 255 값을 찾아서 바닥 처리
     if (validCount === 0) {
+      // 255 값이 있는지 확인
+      let has255 = false;
+      let first255Index = -1;
+      for (let i = 0; i < allDepthValues.length; i++) {
+        if (allDepthValues[i] >= MAX_RAW_SIGNAL) {
+          has255 = true;
+          first255Index = i;
+          break;
+        }
+      }
+
+      if (has255 && depthIndex >= first255Index) {
+        // 바닥 영역으로 처리
+        return hexToRgba("#8B4513"); // Saddle Brown
+      }
       // No valid signals, return transparent
       return { r: 0, g: 0, b: 0, a: 0 };
     }
 
-    const p75 = sortedValues[Math.floor(validCount * 0.75)] || 10;
-    const p90 = sortedValues[Math.floor(validCount * 0.9)] || 20;
-    const p95 = sortedValues[Math.floor(validCount * 0.95)] || 40;
-    const maxSignal = sortedValues[validCount - 1] || 79;
+    const p75 = sortedValues[Math.floor(validCount * 0.75)] || 32;
+    const p90 = sortedValues[Math.floor(validCount * 0.9)] || 64;
+    const p95 = sortedValues[Math.floor(validCount * 0.95)] || 128;
+    const maxSignal = sortedValues[validCount - 1] || 254;
 
     // BOTTOM_THRESHOLD: Use 90th percentile or 75% of max
-    // Adjusted to be less strict since we filtered out 80 values
-    const BOTTOM_THRESHOLD = Math.max(p90, maxSignal * 0.75);
+    // Adjusted to be less strict since we filtered out MAX_RAW_SIGNAL values
+    // Note: This threshold is used for reference/debugging, detection uses STRONG_SIGNAL_THRESHOLD
+    const _BOTTOM_THRESHOLD = Math.max(p90, maxSignal * 0.75);
+    void _BOTTOM_THRESHOLD; // Suppress unused variable warning
 
     // ====================================================================
-    // STEP 3.1A: NEW BOTTOM DETECTION LOGIC (Dual Condition Strategy)
-    //
-    // Condition 1: 값 >= 30 이면서 다음에 70~80이 오면 → 바닥 시작
-    // Condition 2: 물 영역 평균 대비 훨씬 높은 값 (30+)이 연속되면 → 바닥
+    // STEP 1.2: RAW BOTTOM DETECTION (before Kalman filter)
     // ====================================================================
 
-    let bottomStartIndex = -1;
+    let rawBottomStartIndex = -1;
+    let bottomPeakSignal = 0;
     let bottomEndIndex = -1;
-    let secondReflectionStartIndex = -1;
 
-    // Calculate water column average (values < 30, excluding 80)
-    // This represents the "noise floor" of the water area
-    let waterSum = 0;
-    let waterCount = 0;
+    // Thresholds for bottom detection (based on actual 675kHz data analysis)
+    // Lure signals: 15-80, Bottom signals: 100+
+    const STRONG_SIGNAL_THRESHOLD = 100; // 바닥 신호 기준
+    const NEAR_MAX_THRESHOLD = 200; // 강한 바닥 신호 기준
+
+    // ====================================================================
+    // EDGE DETECTION HELPER: 급격한 신호 상승 지점 찾기
+    // 바닥은 갑자기 신호가 올라가는 지점에서 시작됨
+    // ====================================================================
+    const findBottomEdge = (roughBottomIndex: number): number => {
+      if (roughBottomIndex <= 0) return roughBottomIndex;
+
+      // roughBottomIndex 근처에서 가장 급격한 상승 지점 찾기
+      const searchStart = Math.max(0, roughBottomIndex - 5);
+      const searchEnd = Math.min(allDepthValues.length - 1, roughBottomIndex + 2);
+
+      let maxGradient = 0;
+      let edgeIndex = roughBottomIndex;
+
+      for (let i = searchStart; i < searchEnd; i++) {
+        const gradient = allDepthValues[i + 1] - allDepthValues[i];
+        if (gradient > maxGradient) {
+          maxGradient = gradient;
+          edgeIndex = i;
+        }
+      }
+
+      // 기울기가 30 이상일 때만 에지로 인정 (급격한 상승)
+      // 그렇지 않으면 기존 roughBottomIndex 사용
+      return maxGradient >= 30 ? edgeIndex : roughBottomIndex;
+    };
+
+    // ====================================================================
+    // Strategy: Find bottom - 매우 관대한 감지 로직 (검은 빈공간 제거용)
+    // ====================================================================
+
+    // Step 1: 먼저 255 또는 200+ 값이 있는 첫 번째 위치 찾기
+    let first255Index = -1;
+    let firstHighIndex = -1;
     for (let i = 0; i < allDepthValues.length; i++) {
       const val = allDepthValues[i];
-      if (val < 30 && val < 80) {
-        waterSum += val;
-        waterCount++;
+      if (val >= MAX_RAW_SIGNAL && first255Index === -1) {
+        first255Index = i;
+        bottomPeakSignal = MAX_RAW_SIGNAL;
       }
+      if (val >= NEAR_MAX_THRESHOLD && firstHighIndex === -1) {
+        firstHighIndex = i;
+        if (bottomPeakSignal < val) bottomPeakSignal = val;
+      }
+      if (first255Index !== -1 && firstHighIndex !== -1) break;
     }
-    const waterAverage = waterCount > 0 ? waterSum / waterCount : 2;
 
-    // Thresholds for bottom detection
-    const STRONG_SIGNAL_THRESHOLD = 30; // 강한 신호 기준
-    const NEAR_MAX_THRESHOLD = 70; // 80에 가까운 값 기준
-
-    // ====================================================================
-    // Strategy: Find bottom using dual conditions
-    // ====================================================================
+    // Step 2: 바닥 시작점 결정
+    // 루어 신호(15-80)와 바닥 신호(100+)를 구분해야 함
     for (let i = 0; i < allDepthValues.length - 1; i++) {
       const current = allDepthValues[i];
       const next = allDepthValues[i + 1];
 
-      // Skip already high values (we're looking for the START of bottom)
-      if (current >= 80) continue;
-
       // ------------------------------------------------------------------
-      // Condition 1: 값 >= 30 이면서 다음에 70~80이 오면 → 바닥 시작
-      // Pattern: [... 0, 2, 18, 74, 80, 80 ...] → 74 직전의 18 또는 74가 바닥 시작
+      // Condition 0: MAX_RAW_SIGNAL(255) 값이 나오면 바로 바닥 시작
+      // 에지 감지로 정확한 시작점 찾기
       // ------------------------------------------------------------------
-      if (current >= STRONG_SIGNAL_THRESHOLD && next >= NEAR_MAX_THRESHOLD) {
-        bottomStartIndex = i;
+      if (current >= MAX_RAW_SIGNAL) {
+        rawBottomStartIndex = findBottomEdge(i);
+        bottomPeakSignal = current;
         break;
       }
 
       // ------------------------------------------------------------------
-      // Condition 2: 물 영역 평균 대비 훨씬 높은 값 (30+)이 연속되면 → 바닥
-      // Check if current and next are both significantly above water average
+      // Condition 0.5: 200+ 값이 나오면 바닥 시작
+      // 에지 감지로 정확한 시작점 찾기
       // ------------------------------------------------------------------
-      if (i < allDepthValues.length - 2) {
-        const next2 = allDepthValues[i + 2];
-
-        // All three values are >= 30 (significantly above water average of 0~5)
-        if (current >= STRONG_SIGNAL_THRESHOLD &&
-            next >= STRONG_SIGNAL_THRESHOLD &&
-            next2 >= STRONG_SIGNAL_THRESHOLD) {
-          bottomStartIndex = i;
-          break;
-        }
+      if (current >= NEAR_MAX_THRESHOLD) {
+        rawBottomStartIndex = findBottomEdge(i);
+        bottomPeakSignal = current;
+        break;
       }
 
       // ------------------------------------------------------------------
-      // Condition 1b: Look ahead - if next few values contain 70~80,
-      // and current is rising significantly above water average
+      // Condition 1: 값 >= 100 이면서 다음에 150+ 이 오면 → 바닥 시작
+      // 루어 신호는 80 이하이므로 100 이상은 바닥
+      // 에지 감지로 정확한 시작점 찾기
       // ------------------------------------------------------------------
-      if (current >= STRONG_SIGNAL_THRESHOLD - 10 && current > waterAverage * 5) {
-        // Check if 70~80 appears within next 3 samples
-        let hasNearMax = false;
-        for (let j = 1; j <= 3 && i + j < allDepthValues.length; j++) {
+      if (current >= STRONG_SIGNAL_THRESHOLD && next >= 150) {
+        rawBottomStartIndex = findBottomEdge(i);
+        bottomPeakSignal = Math.max(current, next);
+        break;
+      }
+
+      // ------------------------------------------------------------------
+      // Condition 2: 연속 2개 값이 100 이상이면 → 바닥 시작
+      // 80→100으로 상향 (루어 신호 15-80과 구분)
+      // 에지 감지로 정확한 시작점 찾기
+      // ------------------------------------------------------------------
+      if (current >= STRONG_SIGNAL_THRESHOLD && next >= STRONG_SIGNAL_THRESHOLD) {
+        rawBottomStartIndex = findBottomEdge(i);
+        bottomPeakSignal = Math.max(current, next);
+        break;
+      }
+
+      // ------------------------------------------------------------------
+      // Condition 3: Look ahead - 다음 5개 샘플 내에 200+ 있으면
+      // 현재 값이 100 이상일 때만 바닥 시작 (루어 오인 방지)
+      // 에지 감지로 정확한 시작점 찾기
+      // ------------------------------------------------------------------
+      if (current >= STRONG_SIGNAL_THRESHOLD) {
+        let hasHighSignal = false;
+        for (let j = 1; j <= 5 && i + j < allDepthValues.length; j++) {
           if (allDepthValues[i + j] >= NEAR_MAX_THRESHOLD) {
-            hasNearMax = true;
+            hasHighSignal = true;
+            bottomPeakSignal = Math.max(bottomPeakSignal, allDepthValues[i + j]);
             break;
           }
         }
-        if (hasNearMax) {
-          bottomStartIndex = i;
+        if (hasHighSignal) {
+          rawBottomStartIndex = findBottomEdge(i);
           break;
         }
       }
     }
+
+    // ------------------------------------------------------------------
+    // Fallback: 아직 바닥을 못 찾았으면 255 또는 200+ 위치 사용
+    // 에지 감지로 정확한 시작점 찾기
+    // ------------------------------------------------------------------
+    if (rawBottomStartIndex === -1 && first255Index !== -1) {
+      rawBottomStartIndex = findBottomEdge(first255Index);
+      bottomPeakSignal = MAX_RAW_SIGNAL;
+    }
+    if (rawBottomStartIndex === -1 && firstHighIndex !== -1) {
+      rawBottomStartIndex = findBottomEdge(firstHighIndex);
+      bottomPeakSignal = allDepthValues[firstHighIndex];
+    }
+
+    // ====================================================================
+    // STEP 1.3: APPLY KALMAN FILTER FOR STABLE BOTTOM TRACKING
+    // 칼만 필터로 바닥 깊이 안정화 - 구멍(dropout) 방지
+    // ====================================================================
+    const kalmanFilter = getBottomKalmanFilter(columnIndex);
+    const confidence = calculateBottomConfidence(bottomPeakSignal);
+    const stableBottomStartIndex = kalmanFilter.update(rawBottomStartIndex, confidence);
+
+    // 최종 바닥 시작 인덱스 (칼만 필터 적용)
+    const bottomStartIndex = stableBottomStartIndex;
 
     // If bottom found, determine bottom end index
     if (bottomStartIndex !== -1) {
@@ -417,9 +799,9 @@ export function signalToColorT03Average(
       // Bottom ends when we see low values (< 10) for 3+ consecutive samples after the peak
       let peakIndex = bottomStartIndex;
 
-      // First, find the peak (highest signal or first 80)
+      // First, find the peak (highest signal or first MAX_RAW_SIGNAL)
       for (let i = bottomStartIndex; i < Math.min(bottomStartIndex + 10, allDepthValues.length); i++) {
-        if (allDepthValues[i] >= 80) {
+        if (allDepthValues[i] >= MAX_RAW_SIGNAL) {
           peakIndex = i;
           break;
         }
@@ -435,186 +817,184 @@ export function signalToColorT03Average(
         const next1 = allDepthValues[i + 1];
         const next2 = allDepthValues[i + 2];
 
-        // If we're still seeing high values (including 80), extend bottom
-        if (current >= 30 || current >= 80) {
+        // If we're still seeing high values (including MAX_RAW_SIGNAL), extend bottom
+        if (current >= 100 || current >= MAX_RAW_SIGNAL) {
           bottomEndIndex = i;
         }
 
-        // Bottom ends when 3 consecutive low values appear
-        if (current < 10 && next1 < 10 && next2 < 10) {
+        // Bottom ends when 3 consecutive low values appear (< 30)
+        if (current < 30 && next1 < 30 && next2 < 30) {
           break;
         }
       }
     }
 
     // ====================================================================
-    // STEP 3.1B: DETECT SECOND REFLECTION
-    // Second reflection typically appears at ~2x the bottom depth
-    // It will have similar signal characteristics to the first bottom
+    // STEP 2: SIGNAL STRENGTH-BASED 2ND REFLECTION REMOVAL
+    // 2차 반사는 1차 바닥 신호보다 약함 (30~60%)
+    // 바닥 이후 영역에서 피크 신호 대비 약한 신호는 2차 반사로 판단
     // ====================================================================
-    if (bottomStartIndex !== -1 && bottomEndIndex !== -1) {
-      // Look for second reflection in the range [1.5x to 2.5x bottom depth]
-      const searchStart = Math.floor(bottomEndIndex + bottomStartIndex * 0.5);
-      const searchEnd = Math.min(allDepthValues.length, Math.floor(bottomEndIndex + bottomStartIndex * 1.5));
 
-      // Search for sustained high signal in this range
-      for (let i = searchStart; i < searchEnd - 2; i++) {
-        const current = allDepthValues[i];
-        const next1 = allDepthValues[i + 1];
-        const next2 = allDepthValues[i + 2];
+    // 2차 반사 판단 기준:
+    // 1. 바닥 이후 영역이어야 함 (depthIndex > bottomEndIndex)
+    // 2. 바닥 피크 신호의 60% 이하 (2차 반사 특성)
+    // 3. 너무 강한 신호(200+)는 실제 바닥일 수 있음
+    const SECOND_REFLECTION_RATIO = 0.6; // 1차 바닥의 60% 이하면 2차 반사
+    const secondReflectionThreshold = bottomPeakSignal * SECOND_REFLECTION_RATIO;
 
-        // Skip 80 values
-        if (current >= 80 || next1 >= 80 || next2 >= 80) {
-          continue;
-        }
+    const isSecondReflection =
+      bottomStartIndex !== -1 &&
+      bottomEndIndex !== -1 &&
+      depthIndex > bottomEndIndex + 3 && // 바닥 끝 이후 (약간의 여유)
+      raw > 30 && // 노이즈가 아님
+      raw < secondReflectionThreshold && // 바닥 피크의 60% 이하
+      raw < NEAR_MAX_THRESHOLD; // 200 미만 (200+는 실제 바닥)
 
-        // Check for sustained signal similar to bottom
-        // Use lower threshold (50% of BOTTOM_THRESHOLD) for second reflection as it's weaker
-        const secondReflectionThreshold = BOTTOM_THRESHOLD * 0.5;
-        if (current > secondReflectionThreshold && next1 > secondReflectionThreshold && next2 > secondReflectionThreshold) {
-          secondReflectionStartIndex = i;
-          break;
-        }
-      }
+    // 2차 반사 신호는 투명 처리 (제거)
+    if (isSecondReflection) {
+      return { r: 0, g: 0, b: 0, a: 0 };
     }
 
     // ====================================================================
-    // STEP 3.2: CALCULATE AVERAGE FROM ABOVE-BOTTOM REGION ONLY
-    // Only use depth indices BEFORE bottom (0 to bottomStartIndex-1)
-    // Include ALL values including 0 (noise) for accurate average
+    // STEP 3: TVG + SNR BASED SIGNAL PROCESSING
+    // 1. TVG 보정: 깊이에 따른 신호 감쇠 보상
+    // 2. 노이즈 플로어 계산: 바닥 위 물 컬럼의 하위 20% 평균
+    // 3. SNR 계산: TVG 보정 신호 / 노이즈 플로어
     // ====================================================================
+
+    // 3.1: TVG 보정 적용 (모든 깊이 값에 대해)
+    const tvgCorrectedValues = allDepthValues.map((val, idx) => {
+      if (val >= MAX_RAW_SIGNAL) return val; // 255는 특수 값, 보정 안함
+      return applyTVG(val, idx);
+    });
+
+    // 3.2: 노이즈 플로어 계산 (TVG 보정된 바닥 위 영역)
+    const noiseFloor = calculateNoiseFloor(tvgCorrectedValues, bottomStartIndex);
+
+    // 3.3: 현재 픽셀의 TVG 보정값과 SNR 계산
+    const tvgSignal = applyTVG(raw, depthIndex);
+    const snr = calculateSNR(tvgSignal, noiseFloor);
+
+    // 기존 평균값도 계산 (디버깅용)
     let sum = 0;
     let count = 0;
-
-    // If bottom found, calculate average from 0 to bottomStartIndex-1
-    // If no bottom, use all values
     const upperLimit = bottomStartIndex !== -1 ? bottomStartIndex : allDepthValues.length;
 
     for (let i = 0; i < upperLimit; i++) {
       const value = allDepthValues[i];
-      // Include ALL values (even 0) for accurate average calculation
-      // BUT exclude 80 (special "out of range" marker)
-      if (value < 80) {
+      if (value < MAX_RAW_SIGNAL) {
         sum += value;
         count++;
       }
     }
-
-    // Above-bottom average: average of ALL signals from depth 0 to bottom-1
-    // This includes noise (0 values), representing true water column average
     const aboveBottomAverage = count > 0 ? sum / count : p75;
 
     // DEBUG: Log values for first pixel only (to avoid spam)
     if (depthIndex === 0) {
-      console.log("[T03Average Debug]", {
-        waterAverage,
-        bottomStartIndex,
+      console.log("[T03Average Debug - TVG+SNR]", {
+        rawBottomStartIndex,
+        stableBottomStartIndex: bottomStartIndex,
         bottomEndIndex,
-        secondReflectionStartIndex,
-        BOTTOM_THRESHOLD,
-        aboveBottomAverage,
-        minFishThreshold: Math.max(aboveBottomAverage * 3.5, 5),
+        bottomPeakSignal,
+        secondReflectionThreshold,
+        confidence,
+        noiseFloor: noiseFloor.toFixed(2),
+        sampleSNR: (tvgCorrectedValues[30] / noiseFloor).toFixed(2),
+        aboveBottomAverage: aboveBottomAverage.toFixed(2),
         p95,
         maxSignal,
-        sampleValues: allDepthValues.slice(0, 50), // First 50 depths
       });
     }
 
     // ====================================================================
-    // STEP 3.3: HANDLE SECOND REFLECTION AS BOTTOM EXTENSION
-    // Based on real Deeper sonar screenshots, second reflection is also rendered as brown bottom
-    // Not hidden, but treated as continuation of bottom area
+    // STEP 4: BOTTOM AREA RENDERING
+    // 바닥 영역은 칼만 필터로 안정화된 위치 사용
     // ====================================================================
 
-    // Determine if current pixel is in bottom area (including second reflection)
-    // Bottom area includes:
-    // 1. Primary bottom: bottomStartIndex to bottomEndIndex (or beyond if no clear end)
-    // 2. Second reflection: also rendered as brown bottom (matches real sonar behavior)
+    // Determine if current pixel is in bottom area
+    // 바닥 시작 이후 모든 영역은 바닥으로 처리 (검은 빈공간 제거)
     const isBottomArea = bottomStartIndex !== -1 && depthIndex >= bottomStartIndex;
+
+    // 추가 체크: 현재 위치에서 강한 신호(200+)가 있으면 바닥으로 처리
+    const hasStrongSignalHere = raw >= NEAR_MAX_THRESHOLD || raw >= MAX_RAW_SIGNAL;
+    const forceBottomArea = hasStrongSignalHere && bottomStartIndex === -1;
 
     // If we detected second reflection, we know where it starts, but we still render it as bottom
     // The detection is just for logging/debugging purposes
 
-    if (isBottomArea) {
-      // ✅ NEW: Simple linear brown gradient based on signal strength (0~80)
-      // After detecting 4 consecutive 80 values, all remaining depths use brown gradient
+    if (isBottomArea || forceBottomArea) {
+      // ✅ 바닥 영역: 갈색 그라데이션 적용
+      // raw 값이 0이어도 바닥으로 인식되면 갈색으로 채움 (검은 빈 공간 방지)
 
-      // Normalize signal to 0.0 ~ 1.0 range (0 = weak, 80 = strong)
-      const normalizedSignal = Math.min(80, Math.max(0, raw)) / 80;
+      // 바닥 영역에서 raw=0인 경우 기본 갈색으로 채움
+      if (raw < 1) {
+        // 바닥 영역이지만 신호가 없는 곳 → 중간 갈색으로 채움
+        return hexToRgba("#8B4513"); // Saddle Brown (기본 바닥색)
+      }
 
-      // Linear brown gradient: Orange-brown (weak signal) → Very dark brown (strong signal, including 80)
-      const lightBrown = hexToRgba("#DC8C1E"); // 주황빛 갈색 (0 value)
-      const veryDarkBrown = hexToRgba("#5A1F0F"); // 매우 진한 갈색 (80 value)
+      // Normalize signal to 0.0 ~ 1.0 range
+      const normalizedSignal = Math.min(MAX_RAW_SIGNAL, Math.max(0, raw)) / MAX_RAW_SIGNAL;
 
-      return lerpColor(lightBrown, veryDarkBrown, normalizedSignal);
+      // 바닥 색상 그라데이션: 밝은 갈색 → 진한 갈색
+      // raw 100 이하: 밝은 갈색 (바닥 시작)
+      // raw 200+: 진한 갈색 (바닥 핵심)
+      // raw 255: 가장 진한 갈색
+      const lightBrown = hexToRgba("#CD853F"); // Peru (밝은 갈색)
+      const mediumBrown = hexToRgba("#8B4513"); // Saddle Brown (중간 갈색)
+      const darkBrown = hexToRgba("#5D3A1A"); // 진한 갈색
+
+      if (normalizedSignal < 0.4) {
+        // raw 0-100: 밝은 갈색 → 중간 갈색
+        const t = normalizedSignal / 0.4;
+        return lerpColor(lightBrown, mediumBrown, t);
+      } else {
+        // raw 100-255: 중간 갈색 → 진한 갈색
+        const t = (normalizedSignal - 0.4) / 0.6;
+        return lerpColor(mediumBrown, darkBrown, t);
+      }
     } else {
-      // ABOVE BOTTOM AREA: Apply noise filtering first
-      // Noise filtering - values below 0.5 are transparent
-      if (raw < 0.5) {
+      // ====================================================================
+      // ABOVE BOTTOM AREA: SNR-based fish detection (Deeper Style)
+      // TVG 보정 + SNR 기반 연속 그라데이션
+      // 어두운 노랑 → 밝은 노랑 → 연두 → 밝은 녹색 → 흰색
+      // ====================================================================
+
+      // Noise filtering - SNR < 1.5 또는 raw < 0.5는 노이즈
+      if (raw < 0.5 || snr < 1.5) {
         return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent
       }
 
-      // Very weak signals (0.5 ~ 2.0) - semi-transparent dark
-      if (raw < 2.0) {
-        const alpha = Math.floor(((raw - 0.5) / 1.5) * 80); // 0-80 alpha
+      // Very weak signals - SNR 1.5~2.0는 거의 노이즈 수준
+      if (snr < 2.0) {
+        const alpha = Math.floor((snr - 1.5) * 40); // 0-20 alpha
         return { r: 7, g: 7, b: 7, a: alpha };
       }
 
-      // Check if signal is higher than average
-      const difference = raw - aboveBottomAverage;
-
-      // Fish/Lure detection: Signal must be significantly higher than average
-      // ADJUSTED: Increased threshold from 2x to 3.5x to reduce excessive green signals
-      // Only VERY strong signals should appear as bright green (matching real sonar device)
-      const minFishThreshold = Math.max(aboveBottomAverage * 3.5, 5);
-
-      if (raw > minFishThreshold) {
-        // FISH/LURE: Signal significantly HIGHER than average
-        // 4-stage gradient: Dark Yellow → Bright Yellow → Lime Green → Bright Green
-        const excessRatio = Math.min(1, (raw - minFishThreshold) / Math.max(minFishThreshold, 10));
-
-        const darkYellow = hexToRgba("#CCB800"); // Stage 1: Dark Yellow (weak fish)
-        const brightYellow = hexToRgba("#FFFF00"); // Stage 2: Bright Yellow (moderate fish)
-        const limeGreen = hexToRgba("#9acb9aff"); // Stage 3: Lime Green (strong fish)
-        const brightGreen = hexToRgba("#ffffffff"); // Stage 4: Bright Green (very strong fish)
-
-        if (excessRatio > 0.75) {
-          // Stage 4: Very strong fish (Lime Green → Bright Green)
-          const t = (excessRatio - 0.75) / 0.25;
-          return lerpColor(limeGreen, brightGreen, t);
-        } else if (excessRatio > 0.5) {
-          // Stage 3: Strong fish (Bright Yellow → Lime Green)
-          const t = (excessRatio - 0.5) / 0.25;
-          return lerpColor(brightYellow, limeGreen, t);
-        } else if (excessRatio > 0.25) {
-          // Stage 2: Moderate fish (Dark Yellow → Bright Yellow)
-          const t = (excessRatio - 0.25) / 0.25;
-          return lerpColor(darkYellow, brightYellow, t);
-        } else {
-          // Stage 1: Weak fish (Dark Yellow with varying intensity)
-          const alpha = Math.floor(150 + (excessRatio / 0.25) * 105); // 150-255 alpha
-          return { r: darkYellow.r, g: darkYellow.g, b: darkYellow.b, a: alpha };
-        }
-      } else if (difference > 0) {
-        // Slightly above average but not fish: darker, more transparent yellow
-        // ADJUSTED: Reduced alpha values to make these signals less prominent
-        const alpha = Math.min(100, Math.floor((raw / minFishThreshold) * 80));
-        return { r: 20, g: 20, b: 0, a: alpha }; // Darker yellow, lower alpha
-      } else {
-        // BELOW AVERAGE: Background/weak signals
-        // ADJUSTED: Further reduced alpha values for cleaner background
-        const deficitRatio = Math.abs(difference) / Math.max(aboveBottomAverage, 1);
-
-        if (deficitRatio < 0.3) {
-          // Slightly below average: Dark gray/semi-transparent
-          const alpha = Math.floor((1 - deficitRatio / 0.3) * 60); // Reduced from 100 to 60
-          return { r: 40, g: 40, b: 40, a: alpha };
-        } else {
-          // Well below average: Very transparent (background)
-          const alpha = Math.max(10, 40 - Math.floor(deficitRatio * 30)); // Reduced opacity
-          return { r: 7, g: 7, b: 7, a: alpha };
-        }
+      // SNR 2.0~3.0: 노이즈와 약한 신호 사이 (반투명 처리)
+      if (snr < 3.0) {
+        const alpha = Math.floor((snr - 2.0) * 60); // 0-60 alpha
+        return { r: 30, g: 30, b: 20, a: alpha };
       }
+
+      // ====================================================================
+      // SNR >= 3.0: Deeper 스타일 컬러 매핑
+      // 범위 필터링 후 getFishColorDeeper 사용
+      // ====================================================================
+
+      // 범위 체크 (선택된 raw 범위 내에 있는 값만 표시)
+      const isInSelectedRange = raw >= rawRangeMin && raw <= rawRangeMax;
+      const isFullRange = rawRangeMin === 0 && rawRangeMax === 255;
+
+      if (!isFullRange && !isInSelectedRange) {
+        return { r: 0, g: 0, b: 0, a: 0 };
+      }
+
+      // Deeper 스타일 색상 반환 (임계값 상향)
+      // SNR 3~5: 어두운 노랑 (약한 신호)
+      // SNR 5~10: 노랑 → 연두 (일반 어군)
+      // SNR 10~20: 연두 → 밝은 녹색 (강한 어군)
+      // SNR 20+: 밝은 녹색 → 흰색 (매우 강한 신호)
+      return getFishColorDeeper(snr);
     }
   }
 
@@ -632,35 +1012,36 @@ export function signalToColorT03Average(
   const average = T03_DEPTH_AVERAGES[clampedDepth];
 
   // IMPORTANT: Increased thresholds to prevent excessive yellow/green from noise
-  // Original thresholds were too low (average+5, average+10) causing all noise to appear yellow
+  // Original thresholds were too low causing all noise to appear yellow
   // New thresholds require much stronger signals to trigger fish/bottom colors
+  // Thresholds scaled from 80 to 255 (3.1875x)
 
-  if (raw > average + 30) {
+  if (raw > average + 96) {
     // Very high signal: Orange/Brown (bottom)
-    // Only values significantly above average (30+) are considered bottom
-    const excessRatio = Math.min(1, (raw - average - 30) / 30);
+    // Only values significantly above average (96+) are considered bottom
+    const excessRatio = Math.min(1, (raw - average - 96) / 96);
     const orange = hexToRgba("#FF8C00");
     const brown = hexToRgba("#8B4513");
     return lerpColor(orange, brown, excessRatio);
-  } else if (raw > average + 20) {
+  } else if (raw > average + 64) {
     // High signal: Green/Yellow (fish)
-    // Requires 20+ above average to be considered fish
-    const excessRatio = Math.min(1, (raw - average - 20) / 10);
+    // Requires 64+ above average to be considered fish
+    const excessRatio = Math.min(1, (raw - average - 64) / 32);
     const darkYellow = hexToRgba("#CCB800");
     const brightYellow = hexToRgba("#FFFF00");
     return lerpColor(darkYellow, brightYellow, excessRatio);
-  } else if (raw > average + 10) {
+  } else if (raw > average + 32) {
     // Moderate signal: Semi-transparent yellow
-    // 10-20 above average shows as faint yellow
-    const alpha = Math.floor(((raw - average - 10) / 10) * 120);
+    // 32-64 above average shows as faint yellow
+    const alpha = Math.floor(((raw - average - 32) / 32) * 120);
     return { r: 20, g: 20, b: 0, a: alpha };
-  } else if (raw > average + 5) {
+  } else if (raw > average + 16) {
     // Slightly above average: Very faint gray
-    // 5-10 above average shows as barely visible
-    const alpha = Math.floor(((raw - average - 5) / 5) * 60);
+    // 16-32 above average shows as barely visible
+    const alpha = Math.floor(((raw - average - 16) / 16) * 60);
     return { r: 60, g: 60, b: 60, a: alpha };
   } else {
-    // Below average + 5: Transparent (background)
+    // Below average + 16: Transparent (background)
     return { r: 0, g: 0, b: 0, a: 0 };
   }
 }

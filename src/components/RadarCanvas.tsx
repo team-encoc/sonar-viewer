@@ -9,11 +9,13 @@ interface RadarCanvasProps {
   currentIndex: number;
   resolutionMode: "144" | "360" | "720";
   colorMode: "iceFishing" | "t03Average";
+  rawRangeMin?: number;
+  rawRangeMax?: number;
   width?: number;
   height?: number;
 }
 
-export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMode, colorMode, width = 720, height = 500 }: RadarCanvasProps) {
+export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMode, colorMode, rawRangeMin = 0, rawRangeMax = 255, width = 720, height = 500 }: RadarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastRenderedIndexRef = useRef(-1);
 
@@ -32,7 +34,7 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
   };
 
   // Helper function to render a single column
-  const renderColumn = (pixelData: Uint8ClampedArray, packet: ParsedPacket, xPosition: number, columnWidth: number, depthSamples: number) => {
+  const renderColumn = (pixelData: Uint8ClampedArray, packet: ParsedPacket, xPosition: number, columnWidth: number, depthSamples: number, columnIndex: number) => {
     const renderData = createRenderPacket(packet.scanData, depthSamples);
     const MAX_RENDER_PIXELS = height; // Use full canvas height for maximum detail
 
@@ -79,12 +81,13 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
           if (colorMode === "iceFishing") {
             finalColor = signalToColorIceFishing(signal);
           } else {
-            // T03 Average 모드: signal을 raw로 변환하고 전체 깊이 값 배열 전달
-            const raw = signal / 3.2;
+            // T03 Average 모드: signal이 이미 0-255 범위이므로 그대로 사용
+            const raw = signal;
             // Map screen depth index (d) to original 90-sample index
             const originalDepthIndex = Math.floor((d / depthSamples) * 90);
             // Pass all raw depth values for bottom detection and average calculation
-            finalColor = signalToColorT03Average(raw, originalDepthIndex, rawDepthValues);
+            // Also pass rawRangeMin and rawRangeMax for 14-color mapping
+            finalColor = signalToColorT03Average(raw, originalDepthIndex, rawDepthValues, rawRangeMin, rawRangeMax, columnIndex);
           }
 
           // Write final color to pixel data
@@ -135,7 +138,8 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
         // Render each packet as a column
         packetsToRender.forEach((packet, i) => {
           const xPos = width - (packetsToRender.length - i) * columnWidth;
-          renderColumn(pixelData, packet, xPos, columnWidth, depthSamples);
+          const colIndex = startIndex + i;
+          renderColumn(pixelData, packet, xPos, columnWidth, depthSamples, colIndex);
         });
       }
 
@@ -159,12 +163,12 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
       }
 
       // Render new column on the right
-      renderColumn(pixelData, currentPacket, width - columnWidth, columnWidth, depthSamples);
+      renderColumn(pixelData, currentPacket, width - columnWidth, columnWidth, depthSamples, currentIndex);
 
       ctx.putImageData(imageData, 0, 0);
       lastRenderedIndexRef.current = currentIndex;
     }
-  }, [currentPacket, currentIndex, packets, resolutionMode, colorMode, width, height]);
+  }, [currentPacket, currentIndex, packets, resolutionMode, colorMode, rawRangeMin, rawRangeMax, width, height]);
 
   return (
     <div style={{ position: "relative" }}>

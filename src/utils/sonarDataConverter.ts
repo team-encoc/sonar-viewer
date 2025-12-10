@@ -11,9 +11,6 @@
 export function expandSonarSamples(samples: number[], targetDepth: number): Uint8Array {
   const expanded = new Uint8Array(targetDepth);
 
-  // Adjusted gain for 0-80 range (3.2x to map 80 -> 256)
-  const FIXED_GAIN = 3.2;
-
   for (let i = 0; i < targetDepth; i++) {
     const sourceIndex = (i / targetDepth) * samples.length;
     const index0 = Math.floor(sourceIndex);
@@ -25,9 +22,8 @@ export function expandSonarSamples(samples: number[], targetDepth: number): Uint
     const value1 = samples[index1] || 0;
     const interpolated = value0 * (1 - fraction) + value1 * fraction;
 
-    // Apply fixed gain and base noise
-    const baseNoise = Math.random() * 2 + 1;
-    expanded[i] = Math.min(255, Math.floor(interpolated * FIXED_GAIN + baseNoise));
+    // Raw 값 그대로 사용 (0-255 범위)
+    expanded[i] = Math.min(255, Math.floor(interpolated));
   }
 
   return expanded;
