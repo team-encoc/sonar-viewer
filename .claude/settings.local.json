@@ -4,7 +4,14 @@
       "Bash(python analyze_all_packets.py:*)",
       "Bash(python:*)",
       "Bash(npm run dev:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(npm install)",
+      "Bash(brew --version:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh auth status:*)",
+      "Bash(git config:*)"
     ],
     "deny": [],
     "ask": []
