@@ -966,13 +966,13 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
       // ====================================================================
 
       // ====================================================================
-      // SENSITIVITY-BASED SNR FILTERING
+      // SENSITIVITY-BASED SNR FILTERING (UI 기준)
       // 실제 데이터 SNR 범위: 14~74
-      // sensitivity 0   → threshold 10.0 (약한 신호도 표시, 노이즈 많음)
+      // sensitivity 0   → threshold 70.0 (강한 신호만, 깔끔)
       // sensitivity 50  → threshold 40.0 (기본값, 균형)
-      // sensitivity 100 → threshold 70.0 (강한 신호만, 깔끔)
+      // sensitivity 100 → threshold 10.0 (약한 신호도 표시, 노이즈 많음)
       // ====================================================================
-      const snrThreshold = 10.0 + (sensitivity / 100) * 60.0;
+      const snrThreshold = 70.0 - (sensitivity / 100) * 60.0;
 
       // DEBUG: Log sample values (테이블 형식으로 보기 쉽게)
       if (depthIndex === 30 && columnIndex % 50 === 0) {

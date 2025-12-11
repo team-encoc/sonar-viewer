@@ -167,7 +167,7 @@ function App() {
                 {sensitivity}
               </span>
               <span style={{ fontSize: '12px', color: '#999' }}>
-                {sensitivity < 30 ? '(노이즈 많음)' : sensitivity > 70 ? '(깔끔)' : '(균형)'}
+                {sensitivity < 30 ? '(깔끔)' : sensitivity > 70 ? '(노이즈 많음)' : '(균형)'}
               </span>
             </div>
           )}
