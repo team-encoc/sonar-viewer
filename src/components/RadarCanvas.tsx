@@ -11,11 +11,12 @@ interface RadarCanvasProps {
   colorMode: "iceFishing" | "t03Average";
   rawRangeMin?: number;
   rawRangeMax?: number;
+  sensitivity?: number;
   width?: number;
   height?: number;
 }
 
-export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMode, colorMode, rawRangeMin = 0, rawRangeMax = 255, width = 720, height = 500 }: RadarCanvasProps) {
+export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMode, colorMode, rawRangeMin = 0, rawRangeMax = 255, sensitivity = 50, width = 720, height = 500 }: RadarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastRenderedIndexRef = useRef(-1);
 
@@ -86,8 +87,8 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
             // Map screen depth index (d) to original 90-sample index
             const originalDepthIndex = Math.floor((d / depthSamples) * 90);
             // Pass all raw depth values for bottom detection and average calculation
-            // Also pass rawRangeMin and rawRangeMax for 14-color mapping
-            finalColor = signalToColorT03Average(raw, originalDepthIndex, rawDepthValues, rawRangeMin, rawRangeMax, columnIndex);
+            // Also pass rawRangeMin, rawRangeMax, and sensitivity
+            finalColor = signalToColorT03Average(raw, originalDepthIndex, rawDepthValues, rawRangeMin, rawRangeMax, columnIndex, sensitivity);
           }
 
           // Write final color to pixel data
@@ -168,7 +169,7 @@ export function RadarCanvas({ currentPacket, packets, currentIndex, resolutionMo
       ctx.putImageData(imageData, 0, 0);
       lastRenderedIndexRef.current = currentIndex;
     }
-  }, [currentPacket, currentIndex, packets, resolutionMode, colorMode, rawRangeMin, rawRangeMax, width, height]);
+  }, [currentPacket, currentIndex, packets, resolutionMode, colorMode, rawRangeMin, rawRangeMax, sensitivity, width, height]);
 
   return (
     <div style={{ position: "relative" }}>

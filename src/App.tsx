@@ -37,7 +37,7 @@ function App() {
   const [resolutionMode, setResolutionMode] = useState<ResolutionMode>('360');
   const [colorMode, setColorMode] = useState<ColorMode>('t03Average');
   const [selectedRawRange, setSelectedRawRange] = useState<RawRangeOption>(RAW_RANGE_OPTIONS[0]);
-  const [sliderMinRaw, setSliderMinRaw] = useState<number>(0);
+  const [sensitivity, setSensitivity] = useState<number>(50); // 민감도 0-100 (기본값: 50)
 
   const {
     isPlaying,
@@ -149,11 +149,34 @@ function App() {
             </select>
           </div>
 
+          {/* Sensitivity Slider (T03 모드에서만 표시) */}
+          {colorMode === 't03Average' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                민감도:
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={sensitivity}
+                onChange={(e) => setSensitivity(Number(e.target.value))}
+                style={{ width: '150px' }}
+              />
+              <span style={{ fontSize: '14px', color: '#666', minWidth: '60px' }}>
+                {sensitivity}
+              </span>
+              <span style={{ fontSize: '12px', color: '#999' }}>
+                {sensitivity < 30 ? '(노이즈 많음)' : sensitivity > 70 ? '(깔끔)' : '(균형)'}
+              </span>
+            </div>
+          )}
+
           {/* Raw Range Selector (T03 모드에서만 표시) */}
           {colorMode === 't03Average' && (
             <div>
               <label style={{ fontSize: '14px', fontWeight: 'bold', marginRight: '8px' }}>
-                Raw 범위 (8색상):
+                Raw 범위:
               </label>
               <select
                 value={selectedRawRange.value}
@@ -174,44 +197,6 @@ function App() {
               </select>
             </div>
           )}
-
-          {/* 전체 선택 시 슬라이더 + 입력창 표시 */}
-          {colorMode === 't03Average' && selectedRawRange.value === 'all' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <label style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                최소 Raw:
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={255}
-                value={sliderMinRaw}
-                onChange={(e) => {
-                  const val = Math.max(0, Math.min(255, Number(e.target.value) || 0));
-                  setSliderMinRaw(val);
-                }}
-                style={{
-                  width: '60px',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  border: '1px solid #ccc',
-                  fontSize: '14px',
-                  textAlign: 'center'
-                }}
-              />
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round((sliderMinRaw / 255) * 100)}
-                onChange={(e) => setSliderMinRaw(Math.round((Number(e.target.value) / 100) * 255))}
-                style={{ width: '200px' }}
-              />
-              <span style={{ fontSize: '14px', color: '#666' }}>
-                {Math.round((sliderMinRaw / 255) * 100)}%
-              </span>
-            </div>
-          )}
         </div>
       )}
 
@@ -224,8 +209,9 @@ function App() {
             currentIndex={currentIndex}
             resolutionMode={resolutionMode}
             colorMode={colorMode}
-            rawRangeMin={selectedRawRange.value === 'all' ? sliderMinRaw : selectedRawRange.min}
-            rawRangeMax={selectedRawRange.value === 'all' ? 255 : selectedRawRange.max}
+            rawRangeMin={selectedRawRange.min}
+            rawRangeMax={selectedRawRange.max}
+            sensitivity={sensitivity}
             width={720}
             height={500}
           />

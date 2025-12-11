@@ -19,8 +19,8 @@ export const MAX_RAW_SIGNAL = 255;
 class BottomKalmanFilter {
   private x: number = -1; // 상태 (바닥 깊이 인덱스)
   private P: number = 1; // 추정 오차
-  private Q: number = 0.0001; // 프로세스 노이즈 - 더 낮춤 (바닥은 거의 안 변함)
-  private R: number = 0.5; // 측정 노이즈 - 더 높임 (측정 불신)
+  private Q: number = 0.00001; // 프로세스 노이즈 - 매우 낮춤 (바닥은 거의 안 변함)
+  private R: number = 2.0; // 측정 노이즈 - 높임 (측정 불신, 부드러운 추적)
   private initialized: boolean = false;
   private stableCount: number = 0; // 안정화 카운터
 
@@ -46,8 +46,8 @@ class BottomKalmanFilter {
     }
 
     // 급격한 변화 감지 (바닥은 물리적으로 급변하지 않음)
-    // 프레임당 최대 2 인덱스 변화 허용 (3→2로 더 엄격하게)
-    const maxPhysicalChange = 2;
+    // 프레임당 최대 1 인덱스 변화 허용 (2→1로 더 엄격하게, 부드러운 추적)
+    const maxPhysicalChange = 1;
     const diff = Math.abs(measurement - this.x);
 
     if (diff > maxPhysicalChange) {
@@ -588,8 +588,9 @@ const T03_DEPTH_AVERAGES: number[] = [
  * @param rawRangeMin - Minimum raw value for 8-color mapping (default: 0)
  * @param rawRangeMax - Maximum raw value for 8-color mapping (default: 255)
  * @param columnIndex - Column index for Kalman filter tracking (default: 0)
+ * @param sensitivity - Sensitivity setting 0-100 (default: 50). Higher = only strong signals shown
  */
-export function signalToColorT03Average(raw: number, depthIndex: number, allDepthValues?: number[], rawRangeMin: number = 0, rawRangeMax: number = 255, columnIndex: number = 0): ColorRGBA {
+export function signalToColorT03Average(raw: number, depthIndex: number, allDepthValues?: number[], rawRangeMin: number = 0, rawRangeMax: number = 255, columnIndex: number = 0, sensitivity: number = 50): ColorRGBA {
   // ====================================================================
   // STEP 1: BOTTOM DETECTION FIRST (before noise filtering)
   // 바닥 영역이면 raw 값이 0이어도 바닥 색상으로 처리해야 함
@@ -649,9 +650,10 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
     let bottomEndIndex = -1;
 
     // Thresholds for bottom detection (based on actual 675kHz data analysis)
-    // Lure signals: 15-80, Bottom signals: 100+
-    const STRONG_SIGNAL_THRESHOLD = 100; // 바닥 신호 기준
-    const NEAR_MAX_THRESHOLD = 200; // 강한 바닥 신호 기준
+    // Lure signals: 15-80, Bottom signals: 80+
+    // 바닥과 루어 신호를 명확히 구분
+    const STRONG_SIGNAL_THRESHOLD = 80; // 바닥 신호 기준
+    const NEAR_MAX_THRESHOLD = 180; // 강한 바닥 신호 기준
 
     // ====================================================================
     // EDGE DETECTION HELPER: 급격한 신호 상승 지점 찾기
@@ -675,9 +677,9 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
         }
       }
 
-      // 기울기가 30 이상일 때만 에지로 인정 (급격한 상승)
+      // 기울기가 50 이상일 때만 에지로 인정 (더 급격한 상승만)
       // 그렇지 않으면 기존 roughBottomIndex 사용
-      return maxGradient >= 30 ? edgeIndex : roughBottomIndex;
+      return maxGradient >= 50 ? edgeIndex : roughBottomIndex;
     };
 
     // ====================================================================
@@ -727,19 +729,19 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
       }
 
       // ------------------------------------------------------------------
-      // Condition 1: 값 >= 100 이면서 다음에 150+ 이 오면 → 바닥 시작
-      // 루어 신호는 80 이하이므로 100 이상은 바닥
+      // Condition 1: 값 >= 80 이면서 다음에 120+ 이 오면 → 바닥 시작
+      // 루어 신호와 명확히 구분
       // 에지 감지로 정확한 시작점 찾기
       // ------------------------------------------------------------------
-      if (current >= STRONG_SIGNAL_THRESHOLD && next >= 150) {
+      if (current >= STRONG_SIGNAL_THRESHOLD && next >= 120) {
         rawBottomStartIndex = findBottomEdge(i);
         bottomPeakSignal = Math.max(current, next);
         break;
       }
 
       // ------------------------------------------------------------------
-      // Condition 2: 연속 2개 값이 100 이상이면 → 바닥 시작
-      // 80→100으로 상향 (루어 신호 15-80과 구분)
+      // Condition 2: 연속 2개 값이 80 이상이면 → 바닥 시작
+      // 루어 신호는 일반적으로 연속해서 80 이상 유지 안됨
       // 에지 감지로 정확한 시작점 찾기
       // ------------------------------------------------------------------
       if (current >= STRONG_SIGNAL_THRESHOLD && next >= STRONG_SIGNAL_THRESHOLD) {
@@ -749,8 +751,8 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
       }
 
       // ------------------------------------------------------------------
-      // Condition 3: Look ahead - 다음 5개 샘플 내에 200+ 있으면
-      // 현재 값이 100 이상일 때만 바닥 시작 (루어 오인 방지)
+      // Condition 3: Look ahead - 다음 5개 샘플 내에 180+ 있으면
+      // 현재 값이 80 이상일 때 바닥 시작
       // 에지 감지로 정확한 시작점 찾기
       // ------------------------------------------------------------------
       if (current >= STRONG_SIGNAL_THRESHOLD) {
@@ -770,7 +772,7 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
     }
 
     // ------------------------------------------------------------------
-    // Fallback: 아직 바닥을 못 찾았으면 255 또는 200+ 위치 사용
+    // Fallback: 아직 바닥을 못 찾았으면 255 또는 180+ 위치 사용
     // 에지 감지로 정확한 시작점 찾기
     // ------------------------------------------------------------------
     if (rawBottomStartIndex === -1 && first255Index !== -1) {
@@ -818,12 +820,12 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
         const next2 = allDepthValues[i + 2];
 
         // If we're still seeing high values (including MAX_RAW_SIGNAL), extend bottom
-        if (current >= 100 || current >= MAX_RAW_SIGNAL) {
+        if (current >= 80 || current >= MAX_RAW_SIGNAL) {
           bottomEndIndex = i;
         }
 
-        // Bottom ends when 3 consecutive low values appear (< 30)
-        if (current < 30 && next1 < 30 && next2 < 30) {
+        // Bottom ends when 3 consecutive low values appear (< 40)
+        if (current < 40 && next1 < 40 && next2 < 40) {
           break;
         }
       }
@@ -925,31 +927,35 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
     if (isBottomArea || forceBottomArea) {
       // ✅ 바닥 영역: 갈색 그라데이션 적용
       // raw 값이 0이어도 바닥으로 인식되면 갈색으로 채움 (검은 빈 공간 방지)
+      // 바닥은 민감도 필터링 제외 - 항상 표시
 
-      // 바닥 영역에서 raw=0인 경우 기본 갈색으로 채움
-      if (raw < 1) {
-        // 바닥 영역이지만 신호가 없는 곳 → 중간 갈색으로 채움
-        return hexToRgba("#8B4513"); // Saddle Brown (기본 바닥색)
-      }
-
-      // Normalize signal to 0.0 ~ 1.0 range
+      // Normalize signal to 0.0 ~ 1.0 range (raw=0도 바닥 색상으로 처리)
       const normalizedSignal = Math.min(MAX_RAW_SIGNAL, Math.max(0, raw)) / MAX_RAW_SIGNAL;
 
       // 바닥 색상 그라데이션: 밝은 갈색 → 진한 갈색
-      // raw 100 이하: 밝은 갈색 (바닥 시작)
-      // raw 200+: 진한 갈색 (바닥 핵심)
-      // raw 255: 가장 진한 갈색
+      // raw 0-100: 밝은 갈색 (바닥 시작 또는 신호 약한 바닥)
+      // raw 100-200: 중간 갈색 (일반 바닥)
+      // raw 200-255: 진한 갈색 (강한 바닥 반사)
+      const veryLightBrown = hexToRgba("#D2B48C"); // Tan (아주 밝은 갈색 - raw=0용)
       const lightBrown = hexToRgba("#CD853F"); // Peru (밝은 갈색)
       const mediumBrown = hexToRgba("#8B4513"); // Saddle Brown (중간 갈색)
       const darkBrown = hexToRgba("#5D3A1A"); // 진한 갈색
 
-      if (normalizedSignal < 0.4) {
-        // raw 0-100: 밝은 갈색 → 중간 갈색
-        const t = normalizedSignal / 0.4;
+      if (normalizedSignal < 0.1) {
+        // raw 0-25: 아주 밝은 갈색 (빈 공간도 바닥으로 채움)
+        const t = normalizedSignal / 0.1;
+        return lerpColor(veryLightBrown, lightBrown, t);
+      } else if (normalizedSignal < 0.4) {
+        // raw 25-100: 밝은 갈색 → 중간 갈색
+        const t = (normalizedSignal - 0.1) / 0.3;
         return lerpColor(lightBrown, mediumBrown, t);
+      } else if (normalizedSignal < 0.78) {
+        // raw 100-200: 중간 갈색 유지
+        const t = (normalizedSignal - 0.4) / 0.38;
+        return lerpColor(mediumBrown, mediumBrown, t);
       } else {
-        // raw 100-255: 중간 갈색 → 진한 갈색
-        const t = (normalizedSignal - 0.4) / 0.6;
+        // raw 200-255: 중간 갈색 → 진한 갈색
+        const t = (normalizedSignal - 0.78) / 0.22;
         return lerpColor(mediumBrown, darkBrown, t);
       }
     } else {
@@ -959,21 +965,23 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
       // 어두운 노랑 → 밝은 노랑 → 연두 → 밝은 녹색 → 흰색
       // ====================================================================
 
-      // Noise filtering - SNR < 1.5 또는 raw < 0.5는 노이즈
-      if (raw < 0.5 || snr < 1.5) {
+      // ====================================================================
+      // SENSITIVITY-BASED SNR FILTERING
+      // 실제 데이터 SNR 범위: 14~74
+      // sensitivity 0   → threshold 10.0 (약한 신호도 표시, 노이즈 많음)
+      // sensitivity 50  → threshold 40.0 (기본값, 균형)
+      // sensitivity 100 → threshold 70.0 (강한 신호만, 깔끔)
+      // ====================================================================
+      const snrThreshold = 10.0 + (sensitivity / 100) * 60.0;
+
+      // DEBUG: Log sample values (테이블 형식으로 보기 쉽게)
+      if (depthIndex === 30 && columnIndex % 50 === 0) {
+        console.log(`[민감도=${sensitivity}] SNR=${snr.toFixed(1)} (임계값=${snrThreshold.toFixed(1)}) raw=${raw} → ${snr >= snrThreshold ? '✅표시' : '❌숨김'}`);
+      }
+
+      // Noise filtering - 민감도 기준 이하는 노이즈로 처리
+      if (raw < 0.5 || snr < snrThreshold) {
         return { r: 0, g: 0, b: 0, a: 0 }; // Fully transparent
-      }
-
-      // Very weak signals - SNR 1.5~2.0는 거의 노이즈 수준
-      if (snr < 2.0) {
-        const alpha = Math.floor((snr - 1.5) * 40); // 0-20 alpha
-        return { r: 7, g: 7, b: 7, a: alpha };
-      }
-
-      // SNR 2.0~3.0: 노이즈와 약한 신호 사이 (반투명 처리)
-      if (snr < 3.0) {
-        const alpha = Math.floor((snr - 2.0) * 60); // 0-60 alpha
-        return { r: 30, g: 30, b: 20, a: alpha };
       }
 
       // ====================================================================
