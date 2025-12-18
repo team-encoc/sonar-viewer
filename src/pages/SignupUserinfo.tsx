@@ -199,33 +199,40 @@ const SignupUserinfo: React.FC = () => {
     setErrors((prev) => ({ ...prev, phone: error }));
   };
 
-  // Progressive field display logic - show all optional fields after name is valid
+  // Progressive field display logic - 이전 필드가 입력되어야 다음 필드가 보임
+  // 1. 이름 입력 완료 -> 성별 필드 표시
   useEffect(() => {
-    if (formData.name.trim().length >= 2 && !validateName(formData.name)) {
-      if (!showGenderField) {
-        setTimeout(() => setShowGenderField(true), 100);
-      }
-      if (!showBirthDateField) {
-        setTimeout(() => setShowBirthDateField(true), 200);
-      }
-      if (!showPhoneField) {
-        setTimeout(() => setShowPhoneField(true), 300);
-      }
+    const isNameValid = formData.name.trim().length >= 2 && !validateName(formData.name);
+    if (isNameValid && !showGenderField) {
+      setTimeout(() => setShowGenderField(true), 100);
     }
-  }, [formData.name, showGenderField, showBirthDateField, showPhoneField]);
+  }, [formData.name, showGenderField]);
+
+  // 2. 성별 선택 완료 -> 생년월일 필드 표시 (필수 여부 상관없이 값이 입력되어야 다음으로 진행)
+  useEffect(() => {
+    if (!showGenderField) return;
+
+    if (formData.gender && !showBirthDateField) {
+      setTimeout(() => setShowBirthDateField(true), 100);
+    }
+  }, [formData.gender, showGenderField, showBirthDateField]);
+
+  // 3. 생년월일 입력 완료 -> 전화번호 필드 표시 (필수 여부 상관없이 값이 입력되어야 다음으로 진행)
+  useEffect(() => {
+    if (!showBirthDateField) return;
+
+    const isBirthDateValid = formData.birthDate.length === 8 && !validateBirthDate(formData.birthDate);
+    if (isBirthDateValid && !showPhoneField) {
+      setTimeout(() => setShowPhoneField(true), 100);
+    }
+  }, [formData.birthDate, showBirthDateField, showPhoneField]);
 
   // Get current title based on progress
   const getCurrentTitle = () => {
     if (!showGenderField) return "이름을 입력해주세요";
-
-    // 모든 추가 필드가 선택인 경우
-    const allOptional = !isFieldRequired("gender") && !isFieldRequired("birthDate") && !isFieldRequired("phone");
-
-    if (allOptional) {
-      return "추가 정보를 입력해주세요";
-    }
-
-    return "추가 정보를 입력해주세요";
+    if (!showBirthDateField) return "성별을 선택해주세요";
+    if (!showPhoneField) return "생년월일을 입력해주세요";
+    return "전화번호를 입력해주세요";
   };
 
   // Check if form is valid - FIELD_CONFIG에 따라 필수 필드 검증
@@ -300,6 +307,8 @@ const SignupUserinfo: React.FC = () => {
     transition: "opacity 400ms ease, transform 400ms ease",
     transitionDelay: `${index * 100}ms`,
     pointerEvents: visible ? "auto" : "none",
+    position: "relative",
+    zIndex: 10 - index, // 위쪽 필드가 더 높은 z-index를 가지도록 (드롭다운이 아래 필드를 덮도록)
   });
 
   const buttonContainerStyle: React.CSSProperties = {

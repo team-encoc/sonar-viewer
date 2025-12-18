@@ -44,6 +44,7 @@ export const FloatingSelect: React.FC<FloatingSelectProps> = ({
   const containerStyle: React.CSSProperties = {
     position: "relative",
     width: "100%",
+    zIndex: isOpen ? 1001 : 1, // 드롭다운 열릴 때 다른 필드보다 위에 표시
   };
 
   const labelStyle: React.CSSProperties = {
