@@ -1,6 +1,7 @@
 import React from "react";
 import { Button } from "../components/Button";
 import { KakaoIcon, GoogleIcon, NaverIcon } from "../components/SocialIcons";
+import { useScale } from "../hooks/useScale";
 
 // Declare ReactNativeWebView type
 declare global {
@@ -28,6 +29,9 @@ const LoginButtons: React.FC = () => {
   const buttonsParam = searchParams.get("buttons"); // e.g., "kakao,google,naver,email,guest"
 
   const isDark = theme === "dark";
+
+  // Use scale hook for responsive sizing
+  const { scaleSize } = useScale();
 
   // Parse buttons parameter or use defaults
   const visibleButtons: ButtonType[] = buttonsParam
@@ -73,28 +77,43 @@ const LoginButtons: React.FC = () => {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     minHeight: "100vh",
-    padding: "clamp(16px, 5vw, 20px)",
-    paddingBottom: "clamp(32px, 10vw, 48px)",
+    padding: scaleSize(20),
+    paddingTop: scaleSize(80),
+    paddingBottom: scaleSize(48),
     backgroundColor: colors.background,
     boxSizing: "border-box",
+  };
+
+  const logoContainerStyle: React.CSSProperties = {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "flex-start",
+    flex: 1,
+    paddingTop: scaleSize(60),
+  };
+
+  const logoStyle: React.CSSProperties = {
+    width: scaleSize(200),
+    height: scaleSize(200),
+    objectFit: "contain",
   };
 
   const buttonsContainerStyle: React.CSSProperties = {
     display: "flex",
     flexDirection: "column",
     width: "100%",
-    maxWidth: "360px",
-    gap: "clamp(8px, 2.5vw, 10px)",
+    maxWidth: scaleSize(360),
+    gap: scaleSize(10),
   };
 
   const dividerContainerStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: "clamp(12px, 4vw, 16px)",
-    marginBottom: "clamp(12px, 4vw, 16px)",
+    marginTop: scaleSize(16),
+    marginBottom: scaleSize(16),
     width: "100%",
   };
 
@@ -107,27 +126,33 @@ const LoginButtons: React.FC = () => {
   const guestButtonContainerStyle: React.CSSProperties = {
     display: "flex",
     justifyContent: "center",
-    marginTop: "clamp(16px, 5vw, 20px)",
+    marginTop: scaleSize(20),
   };
 
   const guestButtonStyle: React.CSSProperties = {
     background: "none",
     border: "none",
     color: colors.guestText,
-    fontSize: "clamp(12px, 3.5vw, 14px)",
+    fontSize: scaleSize(14),
     fontWeight: 500,
     fontFamily: "Pretendard, -apple-system, BlinkMacSystemFont, sans-serif",
     cursor: "pointer",
-    padding: "clamp(6px, 2vw, 8px)",
+    padding: scaleSize(8),
   };
 
-  const iconSize = 32;
+  const iconSize = scaleSize(32);
 
   return (
     <div style={containerStyle}>
+      {/* Logo Section */}
+      <div style={logoContainerStyle}>
+        <img src="/icon.png" alt="ULTRAX Logo" style={logoStyle} />
+      </div>
+
+      {/* Buttons Section */}
       <div style={buttonsContainerStyle}>
         {/* Kakao Login Button */}
-        {showKakao && <Button title="카카오로 시작하기" variant="kakao" onPress={() => handleButtonClick("kakao")} icon={<KakaoIcon width={iconSize} height={iconSize} />} iconPosition="left" />}
+        {showKakao && <Button title="카카오로 시작하기" variant="kakao" onPress={() => handleButtonClick("kakao")} icon={<KakaoIcon width={iconSize} height={iconSize} />} iconPosition="left" scaleSize={scaleSize} />}
 
         {/* Google Login Button */}
         {showGoogle && (
@@ -139,11 +164,12 @@ const LoginButtons: React.FC = () => {
             icon={<GoogleIcon width={iconSize} height={iconSize} />}
             iconPosition="left"
             isDark={isDark}
+            scaleSize={scaleSize}
           />
         )}
 
         {/* Naver Login Button */}
-        {showNaver && <Button title="네이버로 시작하기" variant="naver" onPress={() => handleButtonClick("naver")} icon={<NaverIcon width={iconSize} height={iconSize} />} iconPosition="left" />}
+        {showNaver && <Button title="네이버로 시작하기" variant="naver" onPress={() => handleButtonClick("naver")} icon={<NaverIcon width={iconSize} height={iconSize} />} iconPosition="left" scaleSize={scaleSize} />}
 
         {/* Divider - Show only when both social buttons and email button are visible */}
         {showDivider && (
@@ -153,7 +179,7 @@ const LoginButtons: React.FC = () => {
         )}
 
         {/* Email Login Button */}
-        {showEmail && <Button title="이메일로 시작하기" variant="assistive" onPress={() => handleButtonClick("email")} isDark={isDark} />}
+        {showEmail && <Button title="이메일로 시작하기" variant="assistive" onPress={() => handleButtonClick("email")} isDark={isDark} scaleSize={scaleSize} />}
 
         {/* Guest Mode Button */}
         {showGuest && (

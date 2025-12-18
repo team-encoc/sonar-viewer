@@ -9,6 +9,7 @@ export interface ButtonProps {
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
   isDark?: boolean;
+  scaleSize: (size: number) => number;
 }
 
 const Button: React.FC<ButtonProps> = ({
@@ -20,6 +21,7 @@ const Button: React.FC<ButtonProps> = ({
   icon,
   iconPosition = 'left',
   isDark = false,
+  scaleSize,
 }) => {
   const [isPressed, setIsPressed] = React.useState(false);
 
@@ -114,20 +116,20 @@ const Button: React.FC<ButtonProps> = ({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    height: 'clamp(40px, 12vw, 48px)',
+    height: scaleSize(48),
     backgroundColor: getBackgroundColor(),
     border: style === 'line' ? `1px solid ${getBorderColor()}` : 'none',
-    borderRadius: 'clamp(6px, 2vw, 8px)',
+    borderRadius: scaleSize(8),
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.6 : 1,
     transition: 'all 0.15s ease',
-    padding: '0 clamp(12px, 4vw, 16px)',
+    padding: `0 ${scaleSize(16)}px`,
     boxSizing: 'border-box',
   };
 
   const textStyle: React.CSSProperties = {
     color: getTextColor(),
-    fontSize: 'clamp(14px, 4vw, 16px)',
+    fontSize: scaleSize(16),
     fontWeight: 500,
     fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, sans-serif',
     letterSpacing: '-0.01em',
@@ -138,8 +140,8 @@ const Button: React.FC<ButtonProps> = ({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: iconPosition === 'left' ? 'clamp(6px, 2vw, 8px)' : 0,
-    marginLeft: iconPosition === 'right' ? 'clamp(6px, 2vw, 8px)' : 0,
+    marginRight: iconPosition === 'left' ? scaleSize(8) : 0,
+    marginLeft: iconPosition === 'right' ? scaleSize(8) : 0,
   };
 
   const handleClick = () => {

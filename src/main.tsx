@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import App from './App';
 import MobileViewer from './pages/MobileViewer';
 import LoginButtons from './pages/LoginButtons';
+import SignupUserinfo from './pages/SignupUserinfo';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -13,6 +14,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/" element={<App />} />
         <Route path="/mobile-viewer" element={<MobileViewer />} />
         <Route path="/login-button" element={<LoginButtons />} />
+        <Route path="/signup-userinfo" element={<SignupUserinfo />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>
