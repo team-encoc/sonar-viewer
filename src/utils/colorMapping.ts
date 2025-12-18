@@ -650,9 +650,8 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
     let bottomEndIndex = -1;
 
     // Thresholds for bottom detection (based on actual 675kHz data analysis)
-    // Lure signals: 15-80, Bottom signals: 80+
-    // 바닥과 루어 신호를 명확히 구분
-    const STRONG_SIGNAL_THRESHOLD = 80; // 바닥 신호 기준
+    // 어군 신호: 15-80 (일시적), 바닥 신호: 100+ (연속적)
+    // 200+ 또는 255는 확실한 바닥
     const NEAR_MAX_THRESHOLD = 180; // 강한 바닥 신호 기준
 
     // ====================================================================
@@ -703,14 +702,17 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
     }
 
     // Step 2: 바닥 시작점 결정
-    // 루어 신호(15-80)와 바닥 신호(100+)를 구분해야 함
-    for (let i = 0; i < allDepthValues.length - 1; i++) {
+    // 바닥은 연속적으로 강한 신호가 유지되어야 함 (어군 신호와 구분)
+    // 어군: 일시적 강한 신호 (1-2개)
+    // 바닥: 지속적 강한 신호 (3개 이상 연속 또는 200+ 값)
+    for (let i = 0; i < allDepthValues.length - 2; i++) {
       const current = allDepthValues[i];
       const next = allDepthValues[i + 1];
+      const next2 = allDepthValues[i + 2];
 
       // ------------------------------------------------------------------
       // Condition 0: MAX_RAW_SIGNAL(255) 값이 나오면 바로 바닥 시작
-      // 에지 감지로 정확한 시작점 찾기
+      // 255는 확실한 바닥 신호
       // ------------------------------------------------------------------
       if (current >= MAX_RAW_SIGNAL) {
         rawBottomStartIndex = findBottomEdge(i);
@@ -719,8 +721,8 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
       }
 
       // ------------------------------------------------------------------
-      // Condition 0.5: 200+ 값이 나오면 바닥 시작
-      // 에지 감지로 정확한 시작점 찾기
+      // Condition 1: 200+ 값이 나오면 바닥 시작
+      // 200 이상은 확실한 바닥
       // ------------------------------------------------------------------
       if (current >= NEAR_MAX_THRESHOLD) {
         rawBottomStartIndex = findBottomEdge(i);
@@ -729,35 +731,23 @@ export function signalToColorT03Average(raw: number, depthIndex: number, allDept
       }
 
       // ------------------------------------------------------------------
-      // Condition 1: 값 >= 80 이면서 다음에 120+ 이 오면 → 바닥 시작
-      // 루어 신호와 명확히 구분
-      // 에지 감지로 정확한 시작점 찾기
+      // Condition 2: 연속 3개 값이 100 이상이면 → 바닥 시작
+      // 어군은 보통 1-2개 샘플에서만 강한 신호, 바닥은 연속적
+      // 임계값을 80→100으로 올려서 어군과 구분
       // ------------------------------------------------------------------
-      if (current >= STRONG_SIGNAL_THRESHOLD && next >= 120) {
+      if (current >= 100 && next >= 100 && next2 >= 100) {
         rawBottomStartIndex = findBottomEdge(i);
-        bottomPeakSignal = Math.max(current, next);
+        bottomPeakSignal = Math.max(current, next, next2);
         break;
       }
 
       // ------------------------------------------------------------------
-      // Condition 2: 연속 2개 값이 80 이상이면 → 바닥 시작
-      // 루어 신호는 일반적으로 연속해서 80 이상 유지 안됨
-      // 에지 감지로 정확한 시작점 찾기
+      // Condition 3: 현재 100+ 이고 다음 3개 내에 180+ 있으면 → 바닥 시작
+      // 바닥 직전 신호가 100 이상이고 곧 강한 바닥이 오는 경우
       // ------------------------------------------------------------------
-      if (current >= STRONG_SIGNAL_THRESHOLD && next >= STRONG_SIGNAL_THRESHOLD) {
-        rawBottomStartIndex = findBottomEdge(i);
-        bottomPeakSignal = Math.max(current, next);
-        break;
-      }
-
-      // ------------------------------------------------------------------
-      // Condition 3: Look ahead - 다음 5개 샘플 내에 180+ 있으면
-      // 현재 값이 80 이상일 때 바닥 시작
-      // 에지 감지로 정확한 시작점 찾기
-      // ------------------------------------------------------------------
-      if (current >= STRONG_SIGNAL_THRESHOLD) {
+      if (current >= 100) {
         let hasHighSignal = false;
-        for (let j = 1; j <= 5 && i + j < allDepthValues.length; j++) {
+        for (let j = 1; j <= 3 && i + j < allDepthValues.length; j++) {
           if (allDepthValues[i + j] >= NEAR_MAX_THRESHOLD) {
             hasHighSignal = true;
             bottomPeakSignal = Math.max(bottomPeakSignal, allDepthValues[i + j]);
