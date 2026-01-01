@@ -17,7 +17,7 @@ type ButtonType = "kakao" | "google" | "naver" | "email" | "guest";
 
 // Default buttons for each platform
 const DEFAULT_BUTTONS: Record<string, ButtonType[]> = {
-  ios: ["email", "guest"],
+  ios: ["kakao", "google", "naver", "email"],
   android: ["kakao", "google", "naver", "email"],
 };
 
@@ -152,7 +152,16 @@ const LoginButtons: React.FC = () => {
       {/* Buttons Section */}
       <div style={buttonsContainerStyle}>
         {/* Kakao Login Button */}
-        {showKakao && <Button title="카카오로 시작하기" variant="kakao" onPress={() => handleButtonClick("kakao")} icon={<KakaoIcon width={iconSize} height={iconSize} />} iconPosition="left" scaleSize={scaleSize} />}
+        {showKakao && (
+          <Button
+            title="카카오로 시작하기"
+            variant="kakao"
+            onPress={() => handleButtonClick("kakao")}
+            icon={<KakaoIcon width={iconSize} height={iconSize} />}
+            iconPosition="left"
+            scaleSize={scaleSize}
+          />
+        )}
 
         {/* Google Login Button */}
         {showGoogle && (
@@ -169,7 +178,16 @@ const LoginButtons: React.FC = () => {
         )}
 
         {/* Naver Login Button */}
-        {showNaver && <Button title="네이버로 시작하기" variant="naver" onPress={() => handleButtonClick("naver")} icon={<NaverIcon width={iconSize} height={iconSize} />} iconPosition="left" scaleSize={scaleSize} />}
+        {showNaver && (
+          <Button
+            title="네이버로 시작하기"
+            variant="naver"
+            onPress={() => handleButtonClick("naver")}
+            icon={<NaverIcon width={iconSize} height={iconSize} />}
+            iconPosition="left"
+            scaleSize={scaleSize}
+          />
+        )}
 
         {/* Divider - Show only when both social buttons and email button are visible */}
         {showDivider && (
