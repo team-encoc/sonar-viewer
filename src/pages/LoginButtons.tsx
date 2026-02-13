@@ -26,9 +26,11 @@ const LoginButtons: React.FC = () => {
   const searchParams = new URLSearchParams(window.location.search);
   const platform = searchParams.get("platform") || "android";
   const theme = searchParams.get("theme") || "light";
+  const lang = searchParams.get("lang") || "ko";
   const buttonsParam = searchParams.get("buttons"); // e.g., "kakao,google,naver,email,guest"
 
   const isDark = theme === "dark";
+  const isKo = lang === "ko";
 
   // Use scale hook for responsive sizing
   const { scaleSize } = useScale();
@@ -62,7 +64,7 @@ const LoginButtons: React.FC = () => {
     } else {
       // For browser testing
       console.log("Login request:", message);
-      alert(`로그인 요청: ${provider}`);
+      alert(isKo ? `로그인 요청: ${provider}` : `Login request: ${provider}`);
     }
   };
 
@@ -154,7 +156,7 @@ const LoginButtons: React.FC = () => {
         {/* Kakao Login Button */}
         {showKakao && (
           <Button
-            title="카카오로 시작하기"
+            title={isKo ? "카카오로 시작하기" : "Continue with Kakao"}
             variant="kakao"
             onPress={() => handleButtonClick("kakao")}
             icon={<KakaoIcon width={iconSize} height={iconSize} />}
@@ -166,7 +168,7 @@ const LoginButtons: React.FC = () => {
         {/* Google Login Button */}
         {showGoogle && (
           <Button
-            title="구글로 시작하기"
+            title={isKo ? "구글로 시작하기" : "Continue with Google"}
             variant="google"
             style="line"
             onPress={() => handleButtonClick("google")}
@@ -180,7 +182,7 @@ const LoginButtons: React.FC = () => {
         {/* Naver Login Button */}
         {showNaver && (
           <Button
-            title="네이버로 시작하기"
+            title={isKo ? "네이버로 시작하기" : "Continue with Naver"}
             variant="naver"
             onPress={() => handleButtonClick("naver")}
             icon={<NaverIcon width={iconSize} height={iconSize} />}
@@ -197,13 +199,13 @@ const LoginButtons: React.FC = () => {
         )}
 
         {/* Email Login Button */}
-        {showEmail && <Button title="이메일로 시작하기" variant="assistive" onPress={() => handleButtonClick("email")} isDark={isDark} scaleSize={scaleSize} />}
+        {showEmail && <Button title={isKo ? "이메일로 시작하기" : "Continue with Email"} variant="assistive" onPress={() => handleButtonClick("email")} isDark={isDark} scaleSize={scaleSize} />}
 
         {/* Guest Mode Button */}
         {showGuest && (
           <div style={guestButtonContainerStyle}>
             <button style={guestButtonStyle} onClick={() => handleButtonClick("guest")}>
-              게스트 모드
+              {isKo ? "게스트 모드" : "Guest Mode"}
             </button>
           </div>
         )}
