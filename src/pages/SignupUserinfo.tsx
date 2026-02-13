@@ -14,50 +14,58 @@ declare global {
 }
 
 // ============================================
-// 📋 필드 설정 - 여기서 필수/선택을 설정하세요
+// Field configuration - set required/optional here
 // ============================================
 const FIELD_CONFIG = {
   name: {
-    required: true, // 필수 여부
-    label: "이름",
-    placeholder: "홍길동 또는 John Doe",
-    supportingText: "한글 또는 영문으로 입력해주세요",
+    required: true,
+    label: { ko: "이름", en: "Name" },
+    placeholder: { ko: "홍길동 또는 John Doe", en: "John Doe" },
+    supportingText: { ko: "한글 또는 영문으로 입력해주세요", en: "Enter your name in Korean or English" },
   },
   gender: {
-    required: false, // 필수 여부
-    label: "성별",
+    required: false,
+    label: { ko: "성별", en: "Gender" },
   },
   birthDate: {
-    required: false, // 필수 여부
-    label: "생년월일",
-    placeholder: "19990101",
-    supportingText: "8자리로 입력해주세요. (ex. 19990101)",
+    required: false,
+    label: { ko: "생년월일", en: "Date of Birth" },
+    placeholder: { ko: "19990101", en: "19990101" },
+    supportingText: { ko: "8자리로 입력해주세요. (ex. 19990101)", en: "Enter 8 digits (e.g. 19990101)" },
   },
   phone: {
-    required: false, // 필수 여부
-    label: "전화번호",
-    placeholder: "010-1234-5678",
+    required: false,
+    label: { ko: "전화번호", en: "Phone Number" },
+    placeholder: { ko: "010-1234-5678", en: "010-1234-5678" },
   },
 } as const;
 
 type FieldName = keyof typeof FIELD_CONFIG;
 
-// 필드가 필수인지 확인
+// Check if field is required
 const isFieldRequired = (field: FieldName): boolean => {
   return FIELD_CONFIG[field].required;
 };
 
-// 라벨에 (선택) 표시 추가
-const getFieldLabel = (field: FieldName): string => {
+// Get label with (optional) suffix
+const getFieldLabel = (field: FieldName, isKo: boolean): string => {
   const config = FIELD_CONFIG[field];
-  return config.required ? config.label : `${config.label} (선택)`;
+  const label = isKo ? config.label.ko : config.label.en;
+  if (config.required) return label;
+  return isKo ? `${label} (선택)` : `${label} (Optional)`;
 };
 
-// Gender options
-const genderOptions = [
-  { label: "남성", value: "male" },
-  { label: "여성", value: "female" },
-];
+// Get placeholder
+const getPlaceholder = (field: "name" | "birthDate" | "phone", isKo: boolean): string => {
+  const config = FIELD_CONFIG[field];
+  return isKo ? config.placeholder.ko : config.placeholder.en;
+};
+
+// Get supporting text
+const getSupportingText = (field: "name" | "birthDate", isKo: boolean): string => {
+  const config = FIELD_CONFIG[field];
+  return isKo ? config.supportingText.ko : config.supportingText.en;
+};
 
 interface FormData {
   name: string;
@@ -74,13 +82,21 @@ interface FormErrors {
 }
 
 const SignupUserinfo: React.FC = () => {
-  // Get theme from URL query parameters
+  // Get theme and lang from URL query parameters
   const searchParams = new URLSearchParams(window.location.search);
   const theme = searchParams.get("theme") || "light";
+  const lang = searchParams.get("lang") || "ko";
   const isDark = theme === "dark";
+  const isKo = lang === "ko";
 
   // Use scale hook for responsive sizing
   const { scaleSize } = useScale();
+
+  // Gender options (language-aware)
+  const genderOptions = [
+    { label: isKo ? "남성" : "Male", value: "male" },
+    { label: isKo ? "여성" : "Female", value: "female" },
+  ];
 
   // Form state
   const [formData, setFormData] = useState<FormData>({
@@ -115,54 +131,45 @@ const SignupUserinfo: React.FC = () => {
 
   // Validation functions
   const validateName = (name: string): string | undefined => {
-    if (!name.trim()) return "이름을 입력해주세요";
-    if (name.trim().length < 2) return "이름은 2자 이상이어야 합니다";
+    if (!name.trim()) return isKo ? "이름을 입력해주세요" : "Please enter your name";
+    if (name.trim().length < 2) return isKo ? "이름은 2자 이상이어야 합니다" : "Name must be at least 2 characters";
     const nameRegex = /^[가-힣a-zA-Z\s]+$/;
-    if (!nameRegex.test(name)) return "한글 또는 영문만 입력해주세요";
+    if (!nameRegex.test(name)) return isKo ? "한글 또는 영문만 입력해주세요" : "Only Korean or English characters allowed";
     return undefined;
   };
 
-  // 성별 검증 - required 설정에 따라 다르게 처리
   const validateGender = (gender: string): string | undefined => {
     if (isFieldRequired("gender") && !gender) {
-      return "성별을 선택해주세요";
+      return isKo ? "성별을 선택해주세요" : "Please select your gender";
     }
     return undefined;
   };
 
-  // 생년월일 검증 - required 설정에 따라 다르게 처리
   const validateBirthDate = (birthDate: string): string | undefined => {
-    // 선택 필드이고 빈 값이면 통과
     if (!isFieldRequired("birthDate") && !birthDate) return undefined;
-    // 필수 필드이고 빈 값이면 에러
-    if (isFieldRequired("birthDate") && !birthDate) return "생년월일을 입력해주세요";
+    if (isFieldRequired("birthDate") && !birthDate) return isKo ? "생년월일을 입력해주세요" : "Please enter your date of birth";
 
-    // 값이 있으면 형식 검증
-    if (birthDate.length !== 8) return "8자리로 입력해주세요";
+    if (birthDate.length !== 8) return isKo ? "8자리로 입력해주세요" : "Please enter 8 digits";
     const dateRegex = /^\d{8}$/;
-    if (!dateRegex.test(birthDate)) return "숫자만 입력해주세요";
+    if (!dateRegex.test(birthDate)) return isKo ? "숫자만 입력해주세요" : "Numbers only";
 
     const year = parseInt(birthDate.substring(0, 4));
     const month = parseInt(birthDate.substring(4, 6));
     const day = parseInt(birthDate.substring(6, 8));
 
-    if (year < 1900 || year > new Date().getFullYear()) return "올바른 연도를 입력해주세요";
-    if (month < 1 || month > 12) return "올바른 월을 입력해주세요";
-    if (day < 1 || day > 31) return "올바른 일을 입력해주세요";
+    if (year < 1900 || year > new Date().getFullYear()) return isKo ? "올바른 연도를 입력해주세요" : "Please enter a valid year";
+    if (month < 1 || month > 12) return isKo ? "올바른 월을 입력해주세요" : "Please enter a valid month";
+    if (day < 1 || day > 31) return isKo ? "올바른 일을 입력해주세요" : "Please enter a valid day";
 
     return undefined;
   };
 
-  // 전화번호 검증 - required 설정에 따라 다르게 처리
   const validatePhone = (phone: string): string | undefined => {
-    // 선택 필드이고 빈 값이면 통과
     if (!isFieldRequired("phone") && !phone) return undefined;
-    // 필수 필드이고 빈 값이면 에러
-    if (isFieldRequired("phone") && !phone) return "전화번호를 입력해주세요";
+    if (isFieldRequired("phone") && !phone) return isKo ? "전화번호를 입력해주세요" : "Please enter your phone number";
 
-    // 값이 있으면 형식 검증
     const phoneRegex = /^01[0-9]-\d{4}-\d{4}$/;
-    if (!phoneRegex.test(phone)) return "올바른 전화번호 형식이 아닙니다";
+    if (!phoneRegex.test(phone)) return isKo ? "올바른 전화번호 형식이 아닙니다" : "Invalid phone number format";
     return undefined;
   };
 
@@ -199,8 +206,7 @@ const SignupUserinfo: React.FC = () => {
     setErrors((prev) => ({ ...prev, phone: error }));
   };
 
-  // Progressive field display logic - 이전 필드가 입력되어야 다음 필드가 보임
-  // 1. 이름 입력 완료 -> 성별 필드 표시
+  // Progressive field display logic
   useEffect(() => {
     const isNameValid = formData.name.trim().length >= 2 && !validateName(formData.name);
     if (isNameValid && !showGenderField) {
@@ -208,19 +214,15 @@ const SignupUserinfo: React.FC = () => {
     }
   }, [formData.name, showGenderField]);
 
-  // 2. 성별 선택 완료 -> 생년월일 필드 표시 (필수 여부 상관없이 값이 입력되어야 다음으로 진행)
   useEffect(() => {
     if (!showGenderField) return;
-
     if (formData.gender && !showBirthDateField) {
       setTimeout(() => setShowBirthDateField(true), 100);
     }
   }, [formData.gender, showGenderField, showBirthDateField]);
 
-  // 3. 생년월일 입력 완료 -> 전화번호 필드 표시 (필수 여부 상관없이 값이 입력되어야 다음으로 진행)
   useEffect(() => {
     if (!showBirthDateField) return;
-
     const isBirthDateValid = formData.birthDate.length === 8 && !validateBirthDate(formData.birthDate);
     if (isBirthDateValid && !showPhoneField) {
       setTimeout(() => setShowPhoneField(true), 100);
@@ -229,24 +231,18 @@ const SignupUserinfo: React.FC = () => {
 
   // Get current title based on progress
   const getCurrentTitle = () => {
-    if (!showGenderField) return "이름을 입력해주세요";
-    if (!showBirthDateField) return "성별을 선택해주세요";
-    if (!showPhoneField) return "생년월일을 입력해주세요";
-    return "전화번호를 입력해주세요";
+    if (!showGenderField) return isKo ? "이름을 입력해주세요" : "Enter your name";
+    if (!showBirthDateField) return isKo ? "성별을 선택해주세요" : "Select your gender";
+    if (!showPhoneField) return isKo ? "생년월일을 입력해주세요" : "Enter your date of birth";
+    return isKo ? "전화번호를 입력해주세요" : "Enter your phone number";
   };
 
-  // Check if form is valid - FIELD_CONFIG에 따라 필수 필드 검증
+  // Check if form is valid
   const isFormValid = () => {
-    // 이름은 항상 필수
     const nameValid = formData.name.trim().length >= 2 && !validateName(formData.name);
-
-    // 각 필드의 required 설정에 따라 검증
     const genderValid = isFieldRequired("gender") ? !!formData.gender && !validateGender(formData.gender) : !validateGender(formData.gender);
-
     const birthDateValid = isFieldRequired("birthDate") ? !!formData.birthDate && !validateBirthDate(formData.birthDate) : !validateBirthDate(formData.birthDate);
-
     const phoneValid = isFieldRequired("phone") ? !!formData.phone && !validatePhone(formData.phone) : !validatePhone(formData.phone);
-
     return nameValid && genderValid && birthDateValid && phoneValid;
   };
 
@@ -268,7 +264,7 @@ const SignupUserinfo: React.FC = () => {
       window.ReactNativeWebView.postMessage(message);
     } else {
       console.log("Form submitted:", message);
-      alert(`회원가입 정보 제출: ${JSON.stringify(formData, null, 2)}`);
+      alert(isKo ? `회원가입 정보 제출: ${JSON.stringify(formData, null, 2)}` : `Signup info submitted: ${JSON.stringify(formData, null, 2)}`);
     }
   };
 
@@ -308,7 +304,7 @@ const SignupUserinfo: React.FC = () => {
     transitionDelay: `${index * 100}ms`,
     pointerEvents: visible ? "auto" : "none",
     position: "relative",
-    zIndex: 10 - index, // 위쪽 필드가 더 높은 z-index를 가지도록 (드롭다운이 아래 필드를 덮도록)
+    zIndex: 10 - index,
   });
 
   const buttonContainerStyle: React.CSSProperties = {
@@ -344,12 +340,12 @@ const SignupUserinfo: React.FC = () => {
         {/* Name Input */}
         <div style={fieldContainerStyle(true, 0)}>
           <FloatingInput
-            label={getFieldLabel("name")}
+            label={getFieldLabel("name", isKo)}
             value={formData.name}
             onChange={handleNameChange}
-            placeholder={FIELD_CONFIG.name.placeholder}
+            placeholder={getPlaceholder("name", isKo)}
             error={errors.name}
-            supportingText={FIELD_CONFIG.name.supportingText}
+            supportingText={getSupportingText("name", isKo)}
             colors={colors}
             scaleSize={scaleSize}
           />
@@ -358,7 +354,7 @@ const SignupUserinfo: React.FC = () => {
         {/* Gender Select */}
         <div style={fieldContainerStyle(showGenderField, 1)}>
           <FloatingSelect
-            label={getFieldLabel("gender")}
+            label={getFieldLabel("gender", isKo)}
             value={formData.gender}
             onChange={handleGenderChange}
             options={genderOptions}
@@ -372,14 +368,14 @@ const SignupUserinfo: React.FC = () => {
         {/* Birth Date Input */}
         <div style={fieldContainerStyle(showBirthDateField, 2)}>
           <FloatingInput
-            label={getFieldLabel("birthDate")}
+            label={getFieldLabel("birthDate", isKo)}
             value={formData.birthDate}
             onChange={handleBirthDateChange}
-            placeholder={FIELD_CONFIG.birthDate.placeholder}
+            placeholder={getPlaceholder("birthDate", isKo)}
             inputMode="numeric"
             maxLength={8}
             error={errors.birthDate}
-            supportingText={FIELD_CONFIG.birthDate.supportingText}
+            supportingText={getSupportingText("birthDate", isKo)}
             colors={colors}
             scaleSize={scaleSize}
           />
@@ -388,10 +384,10 @@ const SignupUserinfo: React.FC = () => {
         {/* Phone Input */}
         <div style={fieldContainerStyle(showPhoneField, 3)}>
           <FloatingInput
-            label={getFieldLabel("phone")}
+            label={getFieldLabel("phone", isKo)}
             value={formData.phone}
             onChange={handlePhoneChange}
-            placeholder={FIELD_CONFIG.phone.placeholder}
+            placeholder={getPlaceholder("phone", isKo)}
             inputMode="tel"
             error={errors.phone}
             colors={colors}
@@ -423,7 +419,7 @@ const SignupUserinfo: React.FC = () => {
             }
           }}
         >
-          가입 완료
+          {isKo ? "가입 완료" : "Complete Sign Up"}
         </button>
       </div>
     </div>
