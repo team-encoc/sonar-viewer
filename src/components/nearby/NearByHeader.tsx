@@ -3,11 +3,11 @@ import React from 'react';
 interface NearByHeaderProps {
   scaleSize: (size: number) => number;
   isDark: boolean;
-  onSearch: () => void;
-  onNotification: () => void;
+  // onSearch: () => void;
+  // onNotification: () => void;
 }
 
-const NearByHeader: React.FC<NearByHeaderProps> = ({ scaleSize, isDark, onSearch, onNotification }) => {
+const NearByHeader: React.FC<NearByHeaderProps> = ({ scaleSize, isDark }) => {
   const headerStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -47,7 +47,7 @@ const NearByHeader: React.FC<NearByHeaderProps> = ({ scaleSize, isDark, onSearch
     color: isDark ? '#f0f0f0' : '#1d1d1d',
   };
 
-  const iconsContainerStyle: React.CSSProperties = {
+  /* const iconsContainerStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     gap: scaleSize(12),
@@ -65,7 +65,7 @@ const NearByHeader: React.FC<NearByHeaderProps> = ({ scaleSize, isDark, onSearch
   };
 
   const iconColor = isDark ? '#ccc' : '#555';
-  const iconSize = scaleSize(20);
+  const iconSize = scaleSize(20); */
 
   return (
     <header style={headerStyle}>

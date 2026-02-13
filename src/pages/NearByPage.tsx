@@ -61,13 +61,13 @@ const NearByPage: React.FC = () => {
     setSelectedItem(null);
   }, []);
 
-  const handleSearch = useCallback(() => {
+  /* const handleSearch = useCallback(() => {
     sendMessage({ type: 'NEARBY_NAVIGATE', action: 'search' });
   }, []);
 
   const handleNotification = useCallback(() => {
     sendMessage({ type: 'NEARBY_NAVIGATE', action: 'notification' });
-  }, []);
+  }, []); */
 
   const handleSortChange = useCallback((order: SortOrder) => {
     setSortOrder(order);
@@ -114,8 +114,6 @@ const NearByPage: React.FC = () => {
       <NearByHeader
         scaleSize={scaleSize}
         isDark={isDark}
-        onSearch={handleSearch}
-        onNotification={handleNotification}
       />
       <div style={contentStyle}>
         <HeroBanner
