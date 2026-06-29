@@ -17,7 +17,7 @@ type ButtonType = "kakao" | "google" | "naver" | "email" | "guest";
 
 // Default buttons for each platform
 const DEFAULT_BUTTONS: Record<string, ButtonType[]> = {
-  ios: ["email", "guest"],
+  ios: ["kakao", "google", "naver", "email"],
   android: ["kakao", "google", "naver", "email"],
 };
 
